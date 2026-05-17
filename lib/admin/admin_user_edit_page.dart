@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../documents_section.dart';
 
 class AdminUserEditPage extends StatefulWidget {
   final String? userId;
@@ -472,6 +473,23 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
                           ),
                         ),
                       ),
+                    ),
+                  ],
+                  // Documents Section (edit mode, employee only)
+                  if (_isEditing && _role == 'employee') ...[
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Documents',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DocumentsSection(
+                      userId: widget.userId!,
+                      editable: true,
                     ),
                   ],
                   const SizedBox(height: 24),

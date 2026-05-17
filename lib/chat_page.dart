@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'theme.dart';
 import 'group_chat_page.dart';
 import 'private_chat_page.dart';
 
@@ -49,39 +50,71 @@ class ChatPage extends StatelessWidget {
         final adminDocs = snapshot.data?.docs ?? [];
 
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: [
+            _sectionLabel('Group'),
             _buildGroupChatCard(context, username),
-            const SizedBox(height: 16),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-              child: Text(
-                'Private Chat',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey,
-                ),
-              ),
-            ),
-            ...adminDocs.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              final adminUsername = data['username'] ?? '';
-              final adminName = data['displayName'] ?? 'Admin';
+            const SizedBox(height: 20),
+            _sectionLabel('Direct Messages'),
+            if (adminDocs.isEmpty)
+              _emptyState('No admins available')
+            else
+              ...adminDocs.map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final adminUsername = data['username'] ?? '';
+                final adminName = data['displayName'] ?? 'Admin';
 
-              final ids = [username, adminUsername]..sort();
-              final chatId = ids.join('_');
+                final ids = [username, adminUsername]..sort();
+                final chatId = ids.join('_');
 
-              return _PrivateChatTile(
-                chatId: chatId,
-                username: username,
-                adminUsername: adminUsername,
-                adminName: adminName,
-              );
-            }),
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _PrivateChatTile(
+                    chatId: chatId,
+                    username: username,
+                    adminUsername: adminUsername,
+                    adminName: adminName,
+                  ),
+                );
+              }),
           ],
         );
       },
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 10),
+      child: Text(
+        text.toUpperCase(),
+        style: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1,
+          color: AppTheme.textTertiary,
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState(String text) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border, width: 0.5),
+      ),
+      child: Center(
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: AppTheme.textTertiary,
+            fontSize: 13,
+          ),
+        ),
+      ),
     );
   }
 
@@ -95,61 +128,39 @@ class ChatPage extends StatelessWidget {
           .limit(50)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Card(
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Colors.deepPurple,
-                child: Icon(Icons.groups, color: Colors.white),
-              ),
-              title: const Text('Group Chat',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('All staff conversation'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const GroupChatPage(),
-                  ),
-                );
-              },
-            ),
-          );
-        }
-
-        final docs = snapshot.data!.docs;
-
         String lastMessage = 'All staff conversation';
         String lastSender = '';
         String lastSenderId = '';
         Timestamp? lastTime;
         int unreadCount = 0;
 
-        if (docs.isNotEmpty) {
-          final lastDoc = docs.first.data() as Map<String, dynamic>;
-          final text = (lastDoc['text'] ?? '').toString();
-          final imageUrl = lastDoc['imageUrl'];
-          final fileUrl = lastDoc['fileUrl'];
+        if (snapshot.hasData) {
+          final docs = snapshot.data!.docs;
+          if (docs.isNotEmpty) {
+            final lastDoc = docs.first.data() as Map<String, dynamic>;
+            final text = (lastDoc['text'] ?? '').toString();
+            final imageUrl = lastDoc['imageUrl'];
+            final fileUrl = lastDoc['fileUrl'];
 
-          if (text.isNotEmpty) {
-            lastMessage = text;
-          } else if (imageUrl != null) {
-            lastMessage = '📷 Photo';
-          } else if (fileUrl != null) {
-            lastMessage = '📎 ${lastDoc['fileName'] ?? 'File'}';
-          }
+            if (text.isNotEmpty) {
+              lastMessage = text;
+            } else if (imageUrl != null) {
+              lastMessage = '📷 Photo';
+            } else if (fileUrl != null) {
+              lastMessage = '📎 ${lastDoc['fileName'] ?? 'File'}';
+            }
 
-          lastSender = lastDoc['senderName'] ?? '';
-          lastSenderId = lastDoc['senderId'] ?? '';
-          lastTime = lastDoc['sentAt'] as Timestamp?;
+            lastSender = lastDoc['senderName'] ?? '';
+            lastSenderId = lastDoc['senderId'] ?? '';
+            lastTime = lastDoc['sentAt'] as Timestamp?;
 
-          for (final doc in docs) {
-            final data = doc.data() as Map<String, dynamic>;
-            final senderId = data['senderId'] ?? '';
-            final readBy = (data['readBy'] as List<dynamic>?) ?? [];
-            if (senderId != username && !readBy.contains(username)) {
-              unreadCount++;
+            for (final doc in docs) {
+              final data = doc.data() as Map<String, dynamic>;
+              final senderId = data['senderId'] ?? '';
+              final readBy = (data['readBy'] as List<dynamic>?) ?? [];
+              if (senderId != username && !readBy.contains(username)) {
+                unreadCount++;
+              }
             }
           }
         }
@@ -157,7 +168,7 @@ class ChatPage extends StatelessWidget {
         final isUnread = unreadCount > 0;
 
         String previewText = lastMessage;
-        if (lastSender.isNotEmpty && docs.isNotEmpty) {
+        if (lastSender.isNotEmpty) {
           if (lastSenderId == username) {
             previewText = 'You: $lastMessage';
           } else {
@@ -165,77 +176,205 @@ class ChatPage extends StatelessWidget {
           }
         }
 
-        return Card(
-          elevation: isUnread ? 3 : 1,
-          color: isUnread ? Colors.deepPurple.shade50 : null,
-          child: ListTile(
-            leading: const CircleAvatar(
-              backgroundColor: Colors.deepPurple,
-              child: Icon(Icons.groups, color: Colors.white),
-            ),
-            title: Text(
-              'Group Chat',
-              style: TextStyle(
-                fontWeight: isUnread ? FontWeight.bold : FontWeight.w500,
-                color: isUnread ? Colors.black : Colors.grey.shade800,
-              ),
-            ),
-            subtitle: Text(
-              previewText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isUnread ? Colors.black : Colors.grey.shade500,
-                fontWeight: isUnread ? FontWeight.bold : FontWeight.normal,
-                fontSize: 13,
-              ),
-            ),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  _formatTime(lastTime),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isUnread ? Colors.deepPurple : Colors.grey.shade600,
-                    fontWeight:
-                        isUnread ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                if (isUnread)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      unreadCount > 9 ? '9+' : '$unreadCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const GroupChatPage(),
-                ),
-              );
-            },
+        return _chatTile(
+          context: context,
+          isGroup: true,
+          isUnread: isUnread,
+          unreadCount: unreadCount,
+          title: 'Group Chat',
+          subtitle: previewText,
+          time: _formatTime(lastTime),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const GroupChatPage()),
           ),
         );
       },
+    );
+  }
+
+  Widget _chatTile({
+    required BuildContext context,
+    required bool isGroup,
+    required bool isUnread,
+    required int unreadCount,
+    required String title,
+    required String subtitle,
+    required String time,
+    required VoidCallback onTap,
+    String? initial,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: isUnread
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, AppTheme.primarySurface],
+                  )
+                : null,
+            color: isUnread ? null : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isUnread ? AppTheme.primarySoft : AppTheme.border,
+              width: isUnread ? 1 : 0.5,
+            ),
+            boxShadow: isUnread
+                ? [
+                    BoxShadow(
+                      color: AppTheme.primary.withOpacity(0.06),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : AppTheme.cardShadow,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  gradient: isGroup
+                      ? const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            AppTheme.primaryLight,
+                            AppTheme.primary,
+                          ],
+                        )
+                      : LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            AppTheme.pinkStart,
+                            AppTheme.pinkEnd,
+                          ],
+                        ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isGroup
+                              ? AppTheme.primary
+                              : AppTheme.pinkIcon)
+                          .withOpacity(0.25),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                alignment: Alignment.center,
+                child: isGroup
+                    ? const Icon(Icons.groups,
+                        color: Colors.white, size: 26)
+                    : Text(
+                        (initial ?? '?'),
+                        style: TextStyle(
+                          color: AppTheme.pinkIcon,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: isUnread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (time.isNotEmpty)
+                          Text(
+                            time,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isUnread
+                                  ? AppTheme.primary
+                                  : AppTheme.textTertiary,
+                              fontWeight: isUnread
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isUnread
+                                  ? AppTheme.textPrimary
+                                  : AppTheme.textSecondary,
+                              fontWeight: isUnread
+                                  ? FontWeight.w500
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                        if (isUnread && unreadCount > 0) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              borderRadius: BorderRadius.circular(10),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFEF4444)
+                                      .withOpacity(0.3),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Text(
+                              unreadCount > 9 ? '9+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -289,114 +428,202 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
           .where('isRead', isEqualTo: false)
           .snapshots(),
       builder: (context, unreadSnap) {
-        int? unreadCountRaw;
+        int unreadCount = 0;
         if (unreadSnap.hasData) {
-          unreadCountRaw = unreadSnap.data!.docs.where((doc) {
+          unreadCount = unreadSnap.data!.docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             return data['senderId'] != widget.username;
           }).length;
         }
-        final unreadCount = unreadCountRaw ?? 0;
-        final bool isUnread = unreadCountRaw != null && unreadCountRaw > 0;
+        final bool isUnread = unreadCount > 0;
 
-        return StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance
+        return FutureBuilder<DocumentSnapshot>(
+          future: FirebaseFirestore.instance
               .collection('chats')
               .doc(widget.chatId)
-              .snapshots(),
+              .get(),
           builder: (context, chatSnap) {
-            final chatData = chatSnap.data?.data() as Map<String, dynamic>?;
+            final chatData =
+                chatSnap.data?.data() as Map<String, dynamic>?;
 
-            String previewText = chatData?['lastMessage'] ?? 'Admin';
+            String previewText = chatData?['lastMessage'] ?? 'Tap to chat';
             final lastSenderId = chatData?['lastSenderId'];
             if (lastSenderId == widget.username &&
                 previewText.isNotEmpty &&
-                previewText != 'Admin') {
+                previewText != 'Tap to chat') {
               previewText = 'You: $previewText';
             }
 
-            return Card(
-              elevation: isUnread ? 3 : 1,
-              color: isUnread ? Colors.deepPurple.shade50 : null,
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Colors.deepPurple.shade300,
-                  child: Text(
-                    widget.adminName.substring(0, 1).toUpperCase(),
-                    style: const TextStyle(color: Colors.white),
+            final time =
+                _formatTime(chatData?['lastMessageAt'] as Timestamp?);
+            final initial =
+                widget.adminName.substring(0, 1).toUpperCase();
+
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PrivateChatPage(
+                      chatId: widget.chatId,
+                      otherUsername: widget.adminUsername,
+                      otherDisplayName: widget.adminName,
+                    ),
                   ),
                 ),
-                title: Text(
-                  widget.adminName,
-                  style: TextStyle(
-                    fontWeight:
-                        isUnread ? FontWeight.bold : FontWeight.w500,
-                    color: isUnread ? Colors.black : Colors.grey.shade800,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: isUnread
+                        ? const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [Colors.white, AppTheme.primarySurface],
+                          )
+                        : null,
+                    color: isUnread ? null : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color:
+                          isUnread ? AppTheme.primarySoft : AppTheme.border,
+                      width: isUnread ? 1 : 0.5,
+                    ),
+                    boxShadow: isUnread
+                        ? [
+                            BoxShadow(
+                              color: AppTheme.primary.withOpacity(0.06),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ]
+                        : AppTheme.cardShadow,
                   ),
-                ),
-                subtitle: Text(
-                  previewText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isUnread ? Colors.black : Colors.grey.shade500,
-                    fontWeight:
-                        isUnread ? FontWeight.bold : FontWeight.normal,
-                    fontSize: 13,
-                  ),
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (chatData?['lastMessageAt'] != null)
-                      Text(
-                        _formatTime(
-                            chatData!['lastMessageAt'] as Timestamp?),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isUnread
-                              ? Colors.deepPurple
-                              : Colors.grey.shade600,
-                          fontWeight: isUnread
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                    const SizedBox(height: 4),
-                    if (isUnread)
+                  child: Row(
+                    children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
+                        width: 50,
+                        height: 50,
                         decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(12),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              AppTheme.pinkStart,
+                              AppTheme.pinkEnd,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.pinkIcon.withOpacity(0.2),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                         ),
+                        alignment: Alignment.center,
                         child: Text(
-                          unreadCount > 9 ? '9+' : '$unreadCount',
+                          initial,
                           style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                            color: AppTheme.pinkIcon,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
-                  ],
-                ),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => PrivateChatPage(
-                        chatId: widget.chatId,
-                        otherUsername: widget.adminUsername,
-                        otherDisplayName: widget.adminName,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    widget.adminName,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: isUnread
+                                          ? FontWeight.w700
+                                          : FontWeight.w600,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (time.isNotEmpty)
+                                  Text(
+                                    time,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isUnread
+                                          ? AppTheme.primary
+                                          : AppTheme.textTertiary,
+                                      fontWeight: isUnread
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    previewText,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: isUnread
+                                          ? AppTheme.textPrimary
+                                          : AppTheme.textSecondary,
+                                      fontWeight: isUnread
+                                          ? FontWeight.w500
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                                if (isUnread) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEF4444),
+                                      borderRadius:
+                                          BorderRadius.circular(10),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFFEF4444)
+                                              .withOpacity(0.3),
+                                          blurRadius: 6,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Text(
+                                      unreadCount > 9 ? '9+' : '$unreadCount',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
+                    ],
+                  ),
+                ),
               ),
             );
           },

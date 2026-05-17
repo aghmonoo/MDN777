@@ -310,11 +310,11 @@ class _PrivateChatTile extends StatefulWidget {
 
 class _PrivateChatTileState extends State<_PrivateChatTile> {
   String _displayName = '';
-  bool _displayNameLoaded = false;
 
   @override
   void initState() {
     super.initState();
+    _displayName = widget.otherUsername;
     _loadDisplayName();
   }
 
@@ -330,24 +330,11 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
         if (mounted) {
           setState(() {
             _displayName = data['displayName'] ?? widget.otherUsername;
-            _displayNameLoaded = true;
-          });
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _displayName = widget.otherUsername;
-            _displayNameLoaded = true;
           });
         }
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _displayName = widget.otherUsername;
-          _displayNameLoaded = true;
-        });
-      }
+      // Keep username as fallback
     }
   }
 
@@ -374,20 +361,21 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
 
   @override
   Widget build(BuildContext context) {
-    final displayName =
-        _displayNameLoaded ? _displayName : widget.otherUsername;
-
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('chats')
           .doc(widget.chatId)
           .collection('messages')
           .where('isRead', isEqualTo: false)
-          .where('senderId', isNotEqualTo: widget.adminUsername)
           .snapshots(),
       builder: (context, unreadSnap) {
-        final int? unreadCountRaw =
-            unreadSnap.hasData ? unreadSnap.data!.docs.length : null;
+        int? unreadCountRaw;
+        if (unreadSnap.hasData) {
+          unreadCountRaw = unreadSnap.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return data['senderId'] != widget.adminUsername;
+          }).length;
+        }
         final unreadCount = unreadCountRaw ?? 0;
         final bool isUnread = unreadCountRaw != null && unreadCountRaw > 0;
 
@@ -405,7 +393,7 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
             leading: CircleAvatar(
               backgroundColor: Colors.deepPurple,
               child: Text(
-                displayName.substring(0, 1).toUpperCase(),
+                _displayName.substring(0, 1).toUpperCase(),
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -413,7 +401,7 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
               ),
             ),
             title: Text(
-              displayName,
+              _displayName,
               style: TextStyle(
                 fontWeight:
                     isUnread ? FontWeight.bold : FontWeight.w500,
@@ -473,7 +461,7 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
                   builder: (context) => PrivateChatPage(
                     chatId: widget.chatId,
                     otherUsername: widget.otherUsername,
-                    otherDisplayName: displayName,
+                    otherDisplayName: _displayName,
                   ),
                 ),
               );

@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'cloudinary_config.dart';
+import 'theme.dart';
 
 class PrivateChatPage extends StatefulWidget {
   final String chatId;
@@ -30,6 +31,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   bool _isUploading = false;
   String _uploadStatus = '';
 
+  Map<String, dynamic>? _replyTo;
+  String? _replyToId;
+
   late final CloudinaryPublic _cloudinary;
 
   @override
@@ -46,7 +50,12 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   Future<void> _loadUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
     final username = user?.email?.split('@').first ?? '';
+    setState(() {
+      _username = username;
+      _displayName = username;
+    });
 
+    if (username.isEmpty) return;
     final snapshot = await FirebaseFirestore.instance
         .collection('users')
         .where('username', isEqualTo: username)
@@ -55,10 +64,11 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
     if (snapshot.docs.isNotEmpty) {
       final data = snapshot.docs.first.data();
-      setState(() {
-        _username = username;
-        _displayName = data['displayName'] ?? username;
-      });
+      if (mounted) {
+        setState(() {
+          _displayName = data['displayName'] ?? username;
+        });
+      }
     }
   }
 
@@ -99,6 +109,8 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         'text': text ?? '',
         'sentAt': FieldValue.serverTimestamp(),
         'isRead': false,
+        'edited': false,
+        'editHistory': [],
       };
 
       if (imageUrl != null) messageData['imageUrl'] = imageUrl;
@@ -107,17 +119,44 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         messageData['fileName'] = fileName ?? 'file';
       }
 
+      if (_replyTo != null && _replyToId != null) {
+        final replyText = (_replyTo!['text'] ?? '').toString();
+        String replyPreview = replyText;
+        if (replyPreview.isEmpty) {
+          if (_replyTo!['imageUrl'] != null) {
+            replyPreview = '📷 Photo';
+          } else if (_replyTo!['fileUrl'] != null) {
+            replyPreview = '📎 ${_replyTo!['fileName'] ?? 'File'}';
+          }
+        }
+        messageData['replyTo'] = {
+          'messageId': _replyToId,
+          'senderName': _replyTo!['senderName'] ?? '',
+          'preview': replyPreview.length > 100
+              ? '${replyPreview.substring(0, 100)}...'
+              : replyPreview,
+        };
+      }
+
       await chatRef.collection('messages').add(messageData);
 
       String lastMessage = text ?? '';
       if (lastMessage.isEmpty) {
-        if (imageUrl != null) lastMessage = '📷 Photo';
-        else if (fileUrl != null) lastMessage = '📎 ${fileName ?? "File"}';
+        if (imageUrl != null) {
+          lastMessage = '📷 Photo';
+        } else if (fileUrl != null) {
+          lastMessage = '📎 ${fileName ?? "File"}';
+        }
       }
 
       await chatRef.update({
         'lastMessage': lastMessage,
         'lastMessageAt': FieldValue.serverTimestamp(),
+      });
+
+      setState(() {
+        _replyTo = null;
+        _replyToId = null;
       });
 
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -138,6 +177,275 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     }
   }
 
+  Future<void> _editMessage(
+      String messageId, String oldText, String newText) async {
+    if (newText.trim().isEmpty || newText.trim() == oldText) return;
+    try {
+      final msgRef = FirebaseFirestore.instance
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .doc(messageId);
+
+      await msgRef.update({
+        'text': newText.trim(),
+        'edited': true,
+        'editHistory': FieldValue.arrayUnion([
+          {
+            'text': oldText,
+            'editedAt': Timestamp.now(),
+          }
+        ]),
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Edit failed: $e')),
+        );
+      }
+    }
+  }
+
+  void _showEditDialog(String messageId, String currentText) {
+    final controller = TextEditingController(text: currentText);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          decoration: const InputDecoration(hintText: 'Edit your message'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              _editMessage(messageId, currentText, controller.text);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditHistory(List<dynamic> history, String currentText) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppTheme.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Row(
+              children: [
+                Icon(Icons.history, size: 18, color: AppTheme.primary),
+                SizedBox(width: 8),
+                Text(
+                  'Edit History',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _historyItem('Current', currentText, null,
+                        isCurrent: true),
+                    ...history.reversed.map((entry) {
+                      final map = entry as Map<String, dynamic>;
+                      return _historyItem(
+                        'Previous',
+                        map['text'] ?? '',
+                        map['editedAt'] as Timestamp?,
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _historyItem(String label, String text, Timestamp? time,
+      {bool isCurrent = false}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isCurrent ? AppTheme.primarySurface : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isCurrent ? AppTheme.primarySoft : AppTheme.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color:
+                      isCurrent ? AppTheme.primary : AppTheme.textTertiary,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  label.toUpperCase(),
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (time != null)
+                Text(
+                  _formatTime(time),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 13,
+              color: AppTheme.textPrimary,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _canEdit(Map<String, dynamic> data) {
+    if (data['senderId'] != _username) return false;
+    if (data['imageUrl'] != null || data['fileUrl'] != null) return false;
+    final text = (data['text'] ?? '').toString();
+    if (text.isEmpty) return false;
+    final sentAt = data['sentAt'] as Timestamp?;
+    if (sentAt == null) return false;
+    final diff = DateTime.now().difference(sentAt.toDate());
+    return diff.inMinutes < 15;
+  }
+
+  void _showMessageOptions(
+      String messageId, Map<String, dynamic> data, bool isMe) {
+    final canEdit = _canEdit(data);
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 10),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppTheme.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: AppTheme.primarySurface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.reply,
+                    color: AppTheme.primary, size: 18),
+              ),
+              title: const Text('Reply',
+                  style: TextStyle(fontWeight: FontWeight.w500)),
+              onTap: () {
+                Navigator.pop(ctx);
+                setState(() {
+                  _replyTo = data;
+                  _replyToId = messageId;
+                });
+              },
+            ),
+            if (canEdit)
+              ListTile(
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primarySurface,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.edit_outlined,
+                      color: AppTheme.primary, size: 18),
+                ),
+                title: const Text('Edit',
+                    style: TextStyle(fontWeight: FontWeight.w500)),
+                subtitle: const Text(
+                  'Within 15 minutes only',
+                  style: TextStyle(fontSize: 11),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showEditDialog(messageId, data['text'] ?? '');
+                },
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _sendTextMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
@@ -150,7 +458,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       type: FileType.image,
       withData: true,
     );
-
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     if (file.bytes == null) return;
@@ -168,7 +475,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           resourceType: CloudinaryResourceType.Image,
         ),
       );
-
       await _sendMessage(imageUrl: response.secureUrl);
     } catch (e) {
       if (mounted) {
@@ -177,7 +483,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         );
       }
     }
-
     if (mounted) {
       setState(() {
         _isUploading = false;
@@ -191,7 +496,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       type: FileType.any,
       withData: true,
     );
-
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     if (file.bytes == null) return;
@@ -209,7 +513,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           resourceType: CloudinaryResourceType.Raw,
         ),
       );
-
       await _sendMessage(fileUrl: response.secureUrl, fileName: file.name);
     } catch (e) {
       if (mounted) {
@@ -218,7 +521,6 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         );
       }
     }
-
     if (mounted) {
       setState(() {
         _isUploading = false;
@@ -270,6 +572,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   }
 
   Future<void> _markAsRead(String messageId) async {
+    if (_username.isEmpty) return;
     try {
       await FirebaseFirestore.instance
           .collection('chats')
@@ -277,9 +580,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           .collection('messages')
           .doc(messageId)
           .update({'isRead': true});
-    } catch (e) {
-      // Silent fail
-    }
+    } catch (_) {}
   }
 
   String _formatTime(Timestamp? timestamp) {
@@ -314,24 +615,36 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
+        ),
         title: Row(
           children: [
-            CircleAvatar(
-              backgroundColor: Colors.white,
-              radius: 16,
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              alignment: Alignment.center,
               child: Text(
                 widget.otherDisplayName.substring(0, 1).toUpperCase(),
                 style: const TextStyle(
-                  color: Colors.deepPurple,
-                  fontWeight: FontWeight.bold,
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
                 ),
               ),
             ),
             const SizedBox(width: 12),
-            Text(widget.otherDisplayName, style: const TextStyle(fontSize: 16)),
+            Text(
+              widget.otherDisplayName,
+              style:
+                  const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            ),
           ],
         ),
       ),
@@ -353,7 +666,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
                   return const Center(
                     child: Text(
                       'No messages yet. Start the conversation!',
-                      style: TextStyle(color: Colors.grey),
+                      style: TextStyle(color: AppTheme.textTertiary),
                     ),
                   );
                 }
@@ -361,9 +674,12 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
                 final docs = snapshot.data!.docs;
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_username.isEmpty) return;
                   for (final doc in docs) {
                     final data = doc.data() as Map<String, dynamic>;
-                    if (data['senderId'] != _username &&
+                    final senderId = data['senderId'] ?? '';
+                    if (senderId.isNotEmpty &&
+                        senderId != _username &&
                         data['isRead'] != true) {
                       _markAsRead(doc.id);
                     }
@@ -380,12 +696,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
                 return ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(14),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
-                    final data = docs[index].data() as Map<String, dynamic>;
+                    final doc = docs[index];
+                    final data = doc.data() as Map<String, dynamic>;
                     final isMe = data['senderId'] == _username;
-                    return _buildMessageBubble(data, isMe);
+                    return _buildMessageBubble(doc.id, data, isMe);
                   },
                 );
               },
@@ -393,8 +710,8 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           ),
           if (_isUploading)
             Container(
-              padding: const EdgeInsets.all(8),
-              color: Colors.blue.shade50,
+              padding: const EdgeInsets.all(10),
+              color: AppTheme.primarySurface,
               child: Row(
                 children: [
                   const SizedBox(
@@ -403,23 +720,92 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: Text(_uploadStatus)),
+                  Expanded(
+                      child: Text(_uploadStatus,
+                          style: const TextStyle(fontSize: 12))),
                 ],
               ),
             ),
+          if (_replyTo != null) _buildReplyPreview(),
           _buildMessageInput(),
         ],
       ),
     );
   }
 
-  Widget _buildMessageBubble(Map<String, dynamic> data, bool isMe) {
+  Widget _buildReplyPreview() {
+    final preview = (_replyTo!['text'] ?? '').toString();
+    String displayPreview = preview;
+    if (displayPreview.isEmpty) {
+      if (_replyTo!['imageUrl'] != null) {
+        displayPreview = '📷 Photo';
+      } else if (_replyTo!['fileUrl'] != null) {
+        displayPreview = '📎 ${_replyTo!['fileName'] ?? 'File'}';
+      }
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+      decoration: const BoxDecoration(
+        color: AppTheme.primarySurface,
+        border: Border(
+          top: BorderSide(color: AppTheme.primarySoft, width: 0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(width: 3, height: 36, color: AppTheme.primary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Replying to ${_replyTo!['senderName'] ?? 'Unknown'}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  displayPreview,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textSecondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            color: AppTheme.textSecondary,
+            onPressed: () => setState(() {
+              _replyTo = null;
+              _replyToId = null;
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageBubble(
+      String messageId, Map<String, dynamic> data, bool isMe) {
     final timeStr = _formatTime(data['sentAt'] as Timestamp?);
     final isRead = data['isRead'] == true;
     final text = (data['text'] ?? '').toString();
     final imageUrl = data['imageUrl'] as String?;
     final fileUrl = data['fileUrl'] as String?;
     final fileName = data['fileName'] as String?;
+    final replyTo = data['replyTo'] as Map<String, dynamic>?;
+    final edited = data['edited'] == true;
+    final editHistory = (data['editHistory'] as List<dynamic>?) ?? [];
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -428,134 +814,234 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
             isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         children: [
           Flexible(
-            child: Column(
-              crossAxisAlignment:
-                  isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              children: [
-                // Image
-                if (imageUrl != null)
-                  GestureDetector(
-                    onTap: () => _showImageViewer(imageUrl),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Image.network(
-                        imageUrl,
-                        width: 220,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, progress) {
-                          if (progress == null) return child;
-                          return Container(
-                            width: 220,
-                            height: 150,
-                            color: Colors.grey.shade200,
-                            child: const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: 220,
-                            height: 100,
-                            color: Colors.grey.shade200,
-                            child: const Icon(Icons.broken_image),
-                          );
-                        },
+            child: GestureDetector(
+              onLongPress: () => _showMessageOptions(messageId, data, isMe),
+              child: Column(
+                crossAxisAlignment:
+                    isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                children: [
+                  if (replyTo != null) _buildReplyChip(replyTo, isMe),
+                  if (imageUrl != null)
+                    GestureDetector(
+                      onTap: () => _showImageViewer(imageUrl),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.network(
+                          imageUrl,
+                          width: 220,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return Container(
+                              width: 220,
+                              height: 150,
+                              color: AppTheme.primarySurface,
+                              child: const Center(
+                                child: CircularProgressIndicator(),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            return Container(
+                              width: 220,
+                              height: 100,
+                              color: AppTheme.primarySurface,
+                              child: const Icon(Icons.broken_image),
+                            );
+                          },
+                        ),
                       ),
                     ),
-                  ),
-                // File
-                if (fileUrl != null) ...[
-                  if (imageUrl != null) const SizedBox(height: 4),
-                  GestureDetector(
-                    onTap: () => _openFile(fileUrl),
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      constraints: const BoxConstraints(maxWidth: 250),
-                      decoration: BoxDecoration(
-                        color: isMe
-                            ? Colors.deepPurple.shade400
-                            : Colors.grey.shade200,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.insert_drive_file,
-                            color: isMe ? Colors.white : Colors.deepPurple,
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              fileName ?? 'File',
-                              style: TextStyle(
-                                color: isMe ? Colors.white : Colors.black87,
-                                fontSize: 13,
-                              ),
-                              overflow: TextOverflow.ellipsis,
+                  if (fileUrl != null) ...[
+                    if (imageUrl != null) const SizedBox(height: 4),
+                    GestureDetector(
+                      onTap: () => _openFile(fileUrl),
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        constraints: const BoxConstraints(maxWidth: 250),
+                        decoration: BoxDecoration(
+                          gradient: isMe
+                              ? const LinearGradient(
+                                  colors: [
+                                    AppTheme.primaryLight,
+                                    AppTheme.primary
+                                  ],
+                                )
+                              : null,
+                          color: isMe ? null : Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: isMe
+                              ? null
+                              : Border.all(
+                                  color: AppTheme.border, width: 0.5),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.insert_drive_file,
+                              color: isMe ? Colors.white : AppTheme.primary,
+                              size: 20,
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.download,
-                            size: 16,
-                            color: isMe ? Colors.white : Colors.deepPurple,
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                fileName ?? 'File',
+                                style: TextStyle(
+                                  color: isMe
+                                      ? Colors.white
+                                      : AppTheme.textPrimary,
+                                  fontSize: 13,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.download,
+                              size: 14,
+                              color: isMe ? Colors.white : AppTheme.primary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (text.isNotEmpty) ...[
+                    if (imageUrl != null || fileUrl != null)
+                      const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      decoration: BoxDecoration(
+                        gradient: isMe
+                            ? const LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  AppTheme.primaryLight,
+                                  AppTheme.primary
+                                ],
+                              )
+                            : null,
+                        color: isMe ? null : Colors.white,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(16),
+                          topRight: const Radius.circular(16),
+                          bottomLeft: Radius.circular(isMe ? 16 : 4),
+                          bottomRight: Radius.circular(isMe ? 4 : 16),
+                        ),
+                        border: isMe
+                            ? null
+                            : Border.all(
+                                color: AppTheme.border, width: 0.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isMe
+                                ? AppTheme.primary.withOpacity(0.15)
+                                : Colors.black.withOpacity(0.04),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
                         ],
                       ),
-                    ),
-                  ),
-                ],
-                // Text
-                if (text.isNotEmpty) ...[
-                  if (imageUrl != null || fileUrl != null)
-                    const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isMe ? Colors.deepPurple : Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      text,
-                      style: TextStyle(
-                        color: isMe ? Colors.white : Colors.black87,
+                      child: Text(
+                        text,
+                        style: TextStyle(
+                          color: isMe ? Colors.white : AppTheme.textPrimary,
+                          fontSize: 14,
+                          height: 1.35,
+                        ),
                       ),
                     ),
+                  ],
+                  Padding(
+                    padding:
+                        const EdgeInsets.only(top: 3, left: 8, right: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (timeStr.isNotEmpty)
+                          Text(
+                            timeStr,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: AppTheme.textTertiary,
+                            ),
+                          ),
+                        if (edited) ...[
+                          const SizedBox(width: 4),
+                          GestureDetector(
+                            onTap: () =>
+                                _showEditHistory(editHistory, text),
+                            child: const Text(
+                              '· edited',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: AppTheme.primary,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            isRead ? Icons.done_all : Icons.done,
+                            size: 14,
+                            color: isRead
+                                ? AppTheme.primary
+                                : AppTheme.textTertiary,
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
-                Padding(
-                  padding: const EdgeInsets.only(top: 2, left: 8, right: 8),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (timeStr.isNotEmpty)
-                        Text(
-                          timeStr,
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.grey.shade600,
-                          ),
-                        ),
-                      if (isMe) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          isRead ? Icons.done_all : Icons.done,
-                          size: 14,
-                          color: isRead
-                              ? Colors.deepPurple
-                              : Colors.grey.shade600,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyChip(Map<String, dynamic> replyTo, bool isMe) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      constraints: const BoxConstraints(maxWidth: 260),
+      decoration: BoxDecoration(
+        color: isMe
+            ? AppTheme.primary.withOpacity(0.15)
+            : AppTheme.primarySurface,
+        borderRadius: BorderRadius.circular(10),
+        border: const Border(
+          left: BorderSide(color: AppTheme.primary, width: 3),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            replyTo['senderName'] ?? 'Unknown',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.primary,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            replyTo['preview'] ?? '',
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -564,51 +1050,80 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
 
   Widget _buildMessageInput() {
     return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade300)),
+        border: Border(top: BorderSide(color: AppTheme.border, width: 0.5)),
       ),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.image, color: Colors.deepPurple),
-            onPressed: _isUploading ? null : _pickAndSendImage,
-            tooltip: 'Send photo',
-          ),
-          IconButton(
-            icon: const Icon(Icons.attach_file, color: Colors.deepPurple),
-            onPressed: _isUploading ? null : _pickAndSendFile,
-            tooltip: 'Send file',
-          ),
-          Expanded(
-            child: TextField(
-              controller: _messageController,
-              decoration: InputDecoration(
-                hintText: 'Type a message...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide.none,
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.image_outlined,
+                  color: AppTheme.primary, size: 22),
+              onPressed: _isUploading ? null : _pickAndSendImage,
+            ),
+            IconButton(
+              icon: const Icon(Icons.attach_file,
+                  color: AppTheme.primary, size: 22),
+              onPressed: _isUploading ? null : _pickAndSendFile,
+            ),
+            Expanded(
+              child: TextField(
+                controller: _messageController,
+                decoration: InputDecoration(
+                  hintText: 'Type a message...',
+                  hintStyle: const TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: 14,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: AppTheme.background,
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
                 ),
-                filled: true,
-                fillColor: Colors.grey.shade100,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                onSubmitted: (_) => _sendTextMessage(),
               ),
-              onSubmitted: (_) => _sendTextMessage(),
             ),
-          ),
-          const SizedBox(width: 8),
-          CircleAvatar(
-            backgroundColor: Colors.deepPurple,
-            child: IconButton(
-              icon: const Icon(Icons.send, color: Colors.white),
-              onPressed: _sendTextMessage,
+            const SizedBox(width: 6),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [AppTheme.primaryLight, AppTheme.primary],
+                ),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primary.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                onPressed: _sendTextMessage,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -82,6 +82,8 @@ class _AdminPayslipBatchDetailPageState
         'kpiBonus',
         'socialSecurity',
         'leaveDeduction',
+        'lateMinutes',
+        'lateAmount',
         'netSalary',
       ];
 
@@ -142,6 +144,12 @@ class _AdminPayslipBatchDetailPageState
             .value = DoubleCellValue((data['leaveDeduction'] ?? 0).toDouble());
         sheet
             .cell(CellIndex.indexByColumnRow(columnIndex: 13, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['lateMinutes'] ?? 0).toDouble());
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 14, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['lateAmount'] ?? 0).toDouble());
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
             .value = DoubleCellValue((data['netSalary'] ?? 0).toDouble());
       }
 

@@ -1,11 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'theme.dart';
 
-class AnnouncementDetailPage extends StatelessWidget {
+class AnnouncementDetailPage extends StatefulWidget {
   final String announcementId;
 
   const AnnouncementDetailPage({super.key, required this.announcementId});
+
+  @override
+  State<AnnouncementDetailPage> createState() =>
+      _AnnouncementDetailPageState();
+}
+
+class _AnnouncementDetailPageState extends State<AnnouncementDetailPage> {
+  @override
+  void initState() {
+    super.initState();
+    _markAsRead();
+  }
+
+  Future<void> _markAsRead() async {
+    final username =
+        FirebaseAuth.instance.currentUser?.email?.split('@').first ?? '';
+    if (username.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('announcements')
+          .doc(widget.announcementId)
+          .update({
+        'readBy': FieldValue.arrayUnion([username]),
+      });
+    } catch (_) {}
+  }
 
   String _formatDate(Timestamp? timestamp) {
     if (timestamp == null) return '';
@@ -13,7 +41,21 @@ class AnnouncementDetailPage extends StatelessWidget {
     final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
     final minute = dt.minute.toString().padLeft(2, '0');
     final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-    return '${dt.day}/${dt.month}/${dt.year} • $hour:$minute $amPm';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year} · $hour:$minute $amPm';
   }
 
   Future<void> _openPdf(BuildContext context, String url) async {
@@ -56,9 +98,15 @@ class AnnouncementDetailPage extends StatelessWidget {
             Positioned(
               top: 8,
               right: 8,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
               ),
             ),
           ],
@@ -70,173 +118,431 @@ class AnnouncementDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
-        title: const Text('Announcement'),
-      ),
+      backgroundColor: AppTheme.background,
       body: FutureBuilder<DocumentSnapshot>(
         future: FirebaseFirestore.instance
             .collection('announcements')
-            .doc(announcementId)
+            .doc(widget.announcementId)
             .get(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return Scaffold(
+              appBar: AppBar(),
+              backgroundColor: AppTheme.background,
+              body: const Center(child: CircularProgressIndicator()),
+            );
           }
           if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
+            return Scaffold(
+              appBar: AppBar(),
+              body: Center(child: Text('Error: ${snapshot.error}')),
+            );
           }
           if (!snapshot.hasData || !snapshot.data!.exists) {
-            return const Center(child: Text('Announcement not found'));
+            return Scaffold(
+              appBar: AppBar(),
+              body: const Center(child: Text('Announcement not found')),
+            );
           }
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
           final imageUrls =
               (data['imageUrls'] as List<dynamic>?)?.cast<String>() ?? [];
           final pdfs = (data['pdfs'] as List<dynamic>?) ?? [];
+          final title = data['title'] ?? 'No title';
+          final body = data['body'] ?? '';
+          final author = data['createdBy'] ?? 'Unknown';
 
-          return SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header section with padding
-                Padding(
-                  padding: const EdgeInsets.all(16),
+          return CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                pinned: true,
+                expandedHeight: 180,
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Container(
+                    decoration:
+                        const BoxDecoration(gradient: AppTheme.heroGradient),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          top: -50,
+                          right: -40,
+                          child: Container(
+                            width: 180,
+                            height: 180,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.08),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: -60,
+                          left: -30,
+                          child: Container(
+                            width: 140,
+                            height: 140,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 70, 20, 18),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.3),
+                                  ),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.campaign,
+                                        size: 12, color: Colors.white),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      'ANNOUNCEMENT',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Title
-                      Text(
-                        data['title'] ?? 'No title',
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
+                      // Author / date card
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: AppTheme.border, width: 0.5),
+                          boxShadow: AppTheme.cardShadow,
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      // Author + Date
-                      Row(
-                        children: [
-                          const Icon(Icons.person,
-                              size: 14, color: Colors.grey),
-                          const SizedBox(width: 4),
-                          Text(
-                            data['createdBy'] ?? 'Unknown',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade700,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          const Icon(Icons.access_time,
-                              size: 14, color: Colors.grey),
-                          const SizedBox(width: 4),
-                          Text(
-                            _formatDate(data['createdAt'] as Timestamp?),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Divider(height: 32),
-                      // Body
-                      Text(
-                        data['body'] ?? '',
-                        style: const TextStyle(fontSize: 16, height: 1.5),
-                      ),
-                    ],
-                  ),
-                ),
-                // Images - full width, Facebook style
-                if (imageUrls.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  ...imageUrls.map((url) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: GestureDetector(
-                        onTap: () => _showImageViewer(context, url),
-                        child: Image.network(
-                          url,
-                          width: double.infinity,
-                          fit: BoxFit.fitWidth,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return Container(
-                              height: 200,
-                              color: Colors.grey.shade200,
-                              child: const Center(
-                                child: CircularProgressIndicator(),
-                              ),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              height: 200,
-                              color: Colors.grey.shade200,
-                              child: const Icon(Icons.broken_image, size: 60),
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  }),
-                ],
-                // PDFs
-                if (pdfs.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Attachments',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...pdfs.map((pdf) {
-                          final pdfData = pdf as Map<String, dynamic>;
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: ListTile(
-                              leading: Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.shade50,
-                                  borderRadius: BorderRadius.circular(8),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    AppTheme.pinkStart,
+                                    AppTheme.pinkEnd,
+                                  ],
                                 ),
-                                child: Icon(
-                                  Icons.picture_as_pdf,
-                                  color: Colors.red.shade700,
-                                ),
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              title: Text(
-                                pdfData['name'] ?? 'PDF File',
+                              alignment: Alignment.center,
+                              child: Text(
+                                author.isNotEmpty
+                                    ? author.substring(0, 1).toUpperCase()
+                                    : '?',
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.w500),
+                                  color: AppTheme.pinkIcon,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                              trailing: const Icon(Icons.download),
-                              onTap: () =>
-                                  _openPdf(context, pdfData['url'] ?? ''),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    author,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppTheme.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.schedule,
+                                          size: 11,
+                                          color: AppTheme.textTertiary),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          _formatDate(
+                                              data['createdAt'] as Timestamp?),
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppTheme.textSecondary,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      // Body
+                      if (body.toString().trim().isNotEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: AppTheme.border, width: 0.5),
+                            boxShadow: AppTheme.cardShadow,
+                          ),
+                          child: Text(
+                            body,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              height: 1.6,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                        ),
+                      // Images
+                      if (imageUrls.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        _sectionLabel(
+                            'PHOTOS', '${imageUrls.length}'),
+                        const SizedBox(height: 10),
+                        ...imageUrls.map((url) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: GestureDetector(
+                              onTap: () => _showImageViewer(context, url),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                      color: AppTheme.border, width: 0.5),
+                                  boxShadow: AppTheme.cardShadow,
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(16),
+                                  child: Image.network(
+                                    url,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    loadingBuilder:
+                                        (context, child, progress) {
+                                      if (progress == null) return child;
+                                      return Container(
+                                        height: 200,
+                                        color: AppTheme.primarySurface,
+                                        child: const Center(
+                                          child: CircularProgressIndicator(),
+                                        ),
+                                      );
+                                    },
+                                    errorBuilder:
+                                        (context, error, stackTrace) {
+                                      return Container(
+                                        height: 200,
+                                        color: AppTheme.primarySurface,
+                                        child: const Icon(
+                                          Icons.broken_image,
+                                          size: 60,
+                                          color: AppTheme.textTertiary,
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
                             ),
                           );
                         }),
                       ],
-                    ),
+                      // PDFs
+                      if (pdfs.isNotEmpty) ...[
+                        const SizedBox(height: 24),
+                        _sectionLabel('ATTACHMENTS', '${pdfs.length}'),
+                        const SizedBox(height: 10),
+                        ...pdfs.map((pdf) {
+                          final pdfData = pdf as Map<String, dynamic>;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _pdfTile(
+                              context: context,
+                              name: pdfData['name'] ?? 'PDF File',
+                              url: pdfData['url'] ?? '',
+                            ),
+                          );
+                        }),
+                      ],
+                    ],
                   ),
-                ],
-                const SizedBox(height: 24),
-              ],
-            ),
+                ),
+              ),
+            ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text, String count) {
+    return Row(
+      children: [
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1,
+            color: AppTheme.textTertiary,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+          decoration: BoxDecoration(
+            color: AppTheme.primarySurface,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            count,
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _pdfTile({
+    required BuildContext context,
+    required String name,
+    required String url,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => _openPdf(context, url),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.border, width: 0.5),
+            boxShadow: AppTheme.cardShadow,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFFEE2E2),
+                      Color(0xFFFCA5A5),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.picture_as_pdf,
+                  color: Color(0xFFB91C1C),
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Tap to open',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: AppTheme.primarySurface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.download_outlined,
+                  color: AppTheme.primary,
+                  size: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

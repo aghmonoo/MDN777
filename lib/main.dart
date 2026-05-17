@@ -4,11 +4,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'login_page.dart';
-import 'announcements_page.dart';
-import 'profile_page.dart';
-import 'payslip_page.dart';
-import 'chat_page.dart';
 import 'admin/admin_main_screen.dart';
+import 'theme.dart';
+import 'home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,10 +30,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Staff Connect',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.themeData,
       home: const AuthWrapper(),
     );
   }
@@ -102,79 +97,14 @@ class RoleRouter extends StatelessWidget {
   }
 }
 
-class MainScreen extends StatefulWidget {
+class MainScreen extends StatelessWidget {
   const MainScreen({super.key});
-
-  @override
-  State<MainScreen> createState() => _MainScreenState();
-}
-
-class _MainScreenState extends State<MainScreen> {
-  int _currentIndex = 0;
-
-  final List<Widget> _pages = const [
-    AnnouncementsPage(),
-    ChatPage(),
-    PaySlipPage(),
-    ProfilePage(),
-  ];
-
-  final List<String> _titles = const [
-    'Staff Connect',
-    'Chat',
-    'Pay Slip',
-    'Profile',
-  ];
-
-  Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
-        title: Text(_titles[_currentIndex]),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _logout,
-            tooltip: 'Logout',
-          ),
-        ],
-      ),
-      body: _pages[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
-        selectedItemColor: Colors.deepPurple,
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat),
-            label: 'Chat',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.receipt_long),
-            label: 'Pay Slip',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
+    return const Scaffold(
+      backgroundColor: AppTheme.background,
+      extendBodyBehindAppBar: true,
+      body: HomeScreen(),
     );
   }
 }
