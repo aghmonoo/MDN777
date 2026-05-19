@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../theme.dart';
 import '../documents_section.dart';
 
 class AdminUserEditPage extends StatefulWidget {
@@ -57,7 +58,6 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
           _joinDate = (data['joinDate'] as Timestamp).toDate();
         }
 
-        // If admin, department should be Admin
         if (_role == 'admin') {
           _department = 'Admin';
         }
@@ -107,7 +107,6 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     setState(() => _isSaving = true);
 
     try {
-      // Check duplicate username (for create mode)
       if (!_isEditing) {
         final existing = await FirebaseFirestore.instance
             .collection('users')
@@ -145,14 +144,12 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         } else {
           data['position'] = FieldValue.delete();
         }
-        // Initialize bank fields for new employee
         if (!_isEditing) {
           data['bankName'] = '';
           data['accountNumber'] = '';
           data['accountHolderName'] = '';
         }
       } else {
-        // Admin: remove employee-only fields
         data['batch'] = FieldValue.delete();
         data['joinDate'] = FieldValue.delete();
         data['position'] = FieldValue.delete();
@@ -195,11 +192,21 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.check_circle, color: Colors.green.shade700),
-            const SizedBox(width: 8),
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.check_circle,
+                  color: Colors.green, size: 20),
+            ),
+            const SizedBox(width: 10),
             const Text('Profile Created'),
           ],
         ),
@@ -211,44 +218,54 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
             const SizedBox(height: 16),
             const Text(
               'Next Step:',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: AppTheme.textPrimary,
+              ),
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.shade200),
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFCD34D)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
                     'Create login account in Firebase Console:',
-                    style: TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  const SizedBox(height: 8),
-                  Text('1. Open Firebase Console',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
-                  Text('2. Go to Authentication → Users',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
-                  Text('3. Click "Add user"',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Email: $username@staffconnect.app',
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF92400E),
                     ),
                   ),
+                  const SizedBox(height: 6),
                   const Text(
-                    'Password: (set your password)',
+                    '1. Open Firebase Console\n2. Authentication → Users\n3. Click "Add user"',
                     style: TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 13,
+                      fontSize: 12,
+                      color: Color(0xFF78350F),
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Email: $username@staffconnect.app',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ],
@@ -259,12 +276,12 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.indigo,
+              backgroundColor: const Color(0xFF3730A3),
               foregroundColor: Colors.white,
             ),
             onPressed: () {
-              Navigator.pop(context); // close dialog
-              Navigator.pop(context); // back to users list
+              Navigator.pop(ctx);
+              Navigator.pop(context);
             },
             child: const Text('OK'),
           ),
@@ -285,9 +302,21 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF1E3A8A),
+                Color(0xFF3730A3),
+                AppTheme.primary,
+              ],
+            ),
+          ),
+        ),
         title: Text(_isEditing ? 'Edit User' : 'Add User'),
         actions: [
           if (_isSaving)
@@ -303,199 +332,318 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
               ),
             )
           else
-            TextButton(
-              onPressed: _save,
-              child: const Text('SAVE', style: TextStyle(color: Colors.white)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              child: TextButton(
+                onPressed: _save,
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'SAVE',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
             ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Basic Info
-                  const Text(
-                    'Basic Information',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
+                  _sectionLabel('BASIC INFORMATION'),
+                  const SizedBox(height: 8),
+                  _card(
+                    child: Column(
+                      children: [
+                        _input(
+                          controller: _usernameController,
+                          label: 'Username *',
+                          icon: Icons.alternate_email,
+                          enabled: !_isEditing,
+                          helper: _isEditing
+                              ? 'Username cannot be changed'
+                              : 'Login email: username@staffconnect.app',
+                        ),
+                        const Divider(height: 1, color: AppTheme.border),
+                        _input(
+                          controller: _displayNameController,
+                          label: 'Display Name *',
+                          icon: Icons.person_outline,
+                        ),
+                        const Divider(height: 1, color: AppTheme.border),
+                        _input(
+                          controller: _employeeIdController,
+                          label: 'Employee ID',
+                          icon: Icons.badge_outlined,
+                          helper: 'e.g. EMP-001 or ADMIN-001',
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _usernameController,
-                    enabled: !_isEditing,
-                    decoration: InputDecoration(
-                      labelText: 'Username *',
-                      border: const OutlineInputBorder(),
-                      helperText: _isEditing
-                          ? 'Username cannot be changed'
-                          : 'Login email: username@staffconnect.app',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _displayNameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Display Name *',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _employeeIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'Employee ID',
-                      border: OutlineInputBorder(),
-                      helperText: 'e.g. EMP-001 or ADMIN-001',
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  // Role
-                  const Text(
-                    'Role',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: _role,
-                    decoration: const InputDecoration(
-                      labelText: 'Role',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                          value: 'employee', child: Text('Employee')),
-                      DropdownMenuItem(value: 'admin', child: Text('Admin')),
-                    ],
-                    onChanged: (value) {
-                      setState(() {
-                        _role = value!;
-                        if (_role == 'admin') {
-                          _department = 'Admin';
-                        } else if (_department == 'Admin') {
-                          _department = 'Moderation';
-                        }
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 24),
-                  // Department (Employee only)
-                  if (_role == 'employee') ...[
-                    const Text(
-                      'Department & Position',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: _department,
-                      decoration: const InputDecoration(
-                        labelText: 'Department',
-                        border: OutlineInputBorder(),
-                      ),
+                  const SizedBox(height: 20),
+                  _sectionLabel('ROLE'),
+                  const SizedBox(height: 8),
+                  _card(
+                    child: _dropdown(
+                      label: 'Role',
+                      icon: Icons.shield_outlined,
+                      value: _role,
                       items: const [
                         DropdownMenuItem(
-                            value: 'Moderation', child: Text('Moderation')),
+                            value: 'employee', child: Text('Employee')),
                         DropdownMenuItem(
-                            value: 'Management', child: Text('Management')),
+                            value: 'admin', child: Text('Admin')),
                       ],
-                      onChanged: (value) {
-                        setState(() => _department = value!);
+                      onChanged: (v) {
+                        setState(() {
+                          _role = v!;
+                          if (_role == 'admin') {
+                            _department = 'Admin';
+                          } else if (_department == 'Admin') {
+                            _department = 'Moderation';
+                          }
+                        });
                       },
                     ),
-                    if (_department == 'Management') ...[
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<String>(
-                        initialValue: _position,
-                        decoration: const InputDecoration(
-                          labelText: 'Position',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: 'QA', child: Text('QA')),
-                          DropdownMenuItem(value: 'TL', child: Text('TL')),
-                        ],
-                        onChanged: (value) {
-                          setState(() => _position = value!);
-                        },
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    // Batch & Join Date
-                    const Text(
-                      'Employment Details',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _batchController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'Batch',
-                        border: OutlineInputBorder(),
-                        prefixText: 'Batch ',
-                        helperText: 'e.g. 1, 2, 3...',
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    InkWell(
-                      onTap: _pickJoinDate,
-                      child: InputDecorator(
-                        decoration: const InputDecoration(
-                          labelText: 'Join Date *',
-                          border: OutlineInputBorder(),
-                          suffixIcon: Icon(Icons.calendar_today),
-                        ),
-                        child: Text(
-                          _joinDate == null
-                              ? 'Select date'
-                              : '${_joinDate!.day}/${_joinDate!.month}/${_joinDate!.year}',
-                          style: TextStyle(
-                            color: _joinDate == null
-                                ? Colors.grey
-                                : Colors.black,
+                  ),
+                  if (_role == 'employee') ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('DEPARTMENT & POSITION'),
+                    const SizedBox(height: 8),
+                    _card(
+                      child: Column(
+                        children: [
+                          _dropdown(
+                            label: 'Department',
+                            icon: Icons.business_outlined,
+                            value: _department,
+                            items: const [
+                              DropdownMenuItem(
+                                  value: 'Moderation',
+                                  child: Text('Moderation')),
+                              DropdownMenuItem(
+                                  value: 'Management',
+                                  child: Text('Management')),
+                            ],
+                            onChanged: (v) =>
+                                setState(() => _department = v!),
                           ),
+                          if (_department == 'Management') ...[
+                            const Divider(
+                                height: 1, color: AppTheme.border),
+                            _dropdown(
+                              label: 'Position',
+                              icon: Icons.work_outline,
+                              value: _position,
+                              items: const [
+                                DropdownMenuItem(
+                                    value: 'QA', child: Text('QA')),
+                                DropdownMenuItem(
+                                    value: 'TL', child: Text('TL')),
+                              ],
+                              onChanged: (v) =>
+                                  setState(() => _position = v!),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _sectionLabel('EMPLOYMENT DETAILS'),
+                    const SizedBox(height: 8),
+                    _card(
+                      child: Column(
+                        children: [
+                          _input(
+                            controller: _batchController,
+                            label: 'Batch',
+                            icon: Icons.numbers,
+                            helper: 'e.g. 1, 2, 3...',
+                            keyboardType: TextInputType.number,
+                          ),
+                          const Divider(height: 1, color: AppTheme.border),
+                          _datePicker(),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (_isEditing && _role == 'employee') ...[
+                    const SizedBox(height: 20),
+                    _sectionLabel('DOCUMENTS'),
+                    const SizedBox(height: 8),
+                    _card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: DocumentsSection(
+                          userId: widget.userId!,
+                          editable: true,
                         ),
                       ),
                     ),
                   ],
-                  // Documents Section (edit mode, employee only)
-                  if (_isEditing && _role == 'employee') ...[
-                    const SizedBox(height: 24),
-                    const Text(
-                      'Documents',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    DocumentsSection(
-                      userId: widget.userId!,
-                      editable: true,
-                    ),
-                  ],
-                  const SizedBox(height: 24),
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1,
+          color: AppTheme.textTertiary,
+        ),
+      ),
+    );
+  }
+
+  Widget _card({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border, width: 0.5),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: child,
+    );
+  }
+
+  Widget _input({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    String? helper,
+    bool enabled = true,
+    TextInputType? keyboardType,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: TextField(
+        controller: controller,
+        enabled: enabled,
+        keyboardType: keyboardType,
+        style: TextStyle(
+          fontSize: 14,
+          color: enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
+        ),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(
+            fontSize: 13,
+            color: AppTheme.textSecondary,
+          ),
+          helperText: helper,
+          helperStyle: const TextStyle(
+            fontSize: 11,
+            color: AppTheme.textTertiary,
+          ),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.only(left: 12, right: 8),
+            child: Icon(icon, size: 18, color: AppTheme.textSecondary),
+          ),
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 0, minHeight: 0),
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        ),
+      ),
+    );
+  }
+
+  Widget _dropdown({
+    required String label,
+    required IconData icon,
+    required String value,
+    required List<DropdownMenuItem<String>> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: DropdownButtonFormField<String>(
+        initialValue: value,
+        isExpanded: true,
+        style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(
+            fontSize: 13,
+            color: AppTheme.textSecondary,
+          ),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.only(left: 12, right: 8),
+            child: Icon(icon, size: 18, color: AppTheme.textSecondary),
+          ),
+          prefixIconConstraints:
+              const BoxConstraints(minWidth: 0, minHeight: 0),
+          border: InputBorder.none,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        ),
+        items: items,
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  Widget _datePicker() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: _pickJoinDate,
+        child: InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Join Date *',
+            labelStyle: TextStyle(
+              fontSize: 13,
+              color: AppTheme.textSecondary,
+            ),
+            prefixIcon: Padding(
+              padding: EdgeInsets.only(left: 12, right: 8),
+              child: Icon(Icons.calendar_today_outlined,
+                  size: 18, color: AppTheme.textSecondary),
+            ),
+            prefixIconConstraints: BoxConstraints(minWidth: 0, minHeight: 0),
+            suffixIcon: Icon(Icons.chevron_right,
+                color: AppTheme.textTertiary),
+            border: InputBorder.none,
+            contentPadding:
+                EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+          child: Text(
+            _joinDate == null
+                ? 'Select date'
+                : '${_joinDate!.day}/${_joinDate!.month}/${_joinDate!.year}',
+            style: TextStyle(
+              fontSize: 14,
+              color: _joinDate == null
+                  ? AppTheme.textTertiary
+                  : AppTheme.textPrimary,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import 'dart:html' as html;
+import '../theme.dart';
 import 'admin_payslip_batch_detail_page.dart';
 
 class AdminPayslipsPage extends StatefulWidget {
@@ -73,6 +74,8 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         'kpiBonus',
         'socialSecurity',
         'leaveDeduction',
+        'lateMinutes',
+        'lateAmount',
         'netSalary',
       ];
 
@@ -111,9 +114,9 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: rowIndex))
             .value = TextCellValue(currentMonth);
 
-        sheet.cell(CellIndex.indexByColumnRow(
-                columnIndex: 13, rowIndex: rowIndex))
-            .value = FormulaCellValue('I$excelRowNum+J$excelRowNum+K$excelRowNum-L$excelRowNum-M$excelRowNum');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
+            .value = FormulaCellValue(
+                'I$excelRowNum+J$excelRowNum+K$excelRowNum-L$excelRowNum-M$excelRowNum-O$excelRowNum');
       }
 
       final bytes = excel.save();
@@ -185,7 +188,6 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
       final excel = Excel.decodeBytes(fileBytes);
       final sheet = excel.tables[excel.tables.keys.first]!;
 
-      // Get month from first data row
       String batchMonth = '';
       if (sheet.rows.length > 1) {
         batchMonth = sheet.rows[1][7]?.value?.toString() ?? '';
@@ -195,7 +197,6 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         throw Exception('Month column is empty in Excel');
       }
 
-      // Check duplicate batch
       final existingBatch = await FirebaseFirestore.instance
           .collection('payslip_batches')
           .where('month', isEqualTo: batchMonth)
@@ -222,7 +223,6 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
       final user = FirebaseAuth.instance.currentUser;
       final importedBy = user?.email?.split('@').first ?? 'admin';
 
-      // Create batch first
       final batchRef = await FirebaseFirestore.instance
           .collection('payslip_batches')
           .add({
@@ -257,10 +257,17 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
           final kpiBonus = _parseNumber(row[10]?.value);
           final socialSecurity = _parseNumber(row[11]?.value);
           final leaveDeduction = _parseNumber(row[12]?.value);
+          final lateMinutes = _parseNumber(row[13]?.value);
+          final lateAmount = _parseNumber(row[14]?.value);
 
           if (employeeId.isEmpty || username.isEmpty || month.isEmpty) continue;
 
-          final netSalary = basicSalary + allowance + kpiBonus - socialSecurity - leaveDeduction;
+          final netSalary = basicSalary +
+              allowance +
+              kpiBonus -
+              socialSecurity -
+              leaveDeduction -
+              lateAmount;
 
           await FirebaseFirestore.instance.collection('payslips').add({
             'batchId': batchRef.id,
@@ -277,6 +284,8 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
             'kpiBonus': kpiBonus,
             'socialSecurity': socialSecurity,
             'leaveDeduction': leaveDeduction,
+            'lateMinutes': lateMinutes,
+            'lateAmount': lateAmount,
             'netSalary': netSalary,
             'issuedDate': FieldValue.serverTimestamp(),
           });
@@ -289,7 +298,6 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         }
       }
 
-      // Update batch with totals
       await batchRef.update({
         'totalEmployees': successCount,
         'totalNetSalary': totalNetSalary,
@@ -326,6 +334,7 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Import Result'),
         content: SingleChildScrollView(
           child: Column(
@@ -382,59 +391,84 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
     final isLoading = _isExporting || _isImporting;
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
-        title: const Text('Manage Payslips'),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF1E3A8A),
+                Color(0xFF3730A3),
+                AppTheme.primary,
+              ],
+            ),
+          ),
+        ),
+        title: const Text('Pay Slips'),
       ),
       body: Column(
         children: [
           Container(
             padding: const EdgeInsets.all(16),
-            color: Colors.indigo.shade50,
+            color: Colors.white,
             child: Column(
               children: [
                 Row(
                   children: [
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: isLoading ? null : _exportExcel,
-                        icon: const Icon(Icons.download),
-                        label: const Text('Export Excel'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
+                      child: _actionButton(
+                        icon: Icons.file_download_outlined,
+                        label: 'Export Excel',
+                        gradStart: const Color(0xFF10B981),
+                        gradEnd: const Color(0xFF059669),
+                        onTap: isLoading ? null : _exportExcel,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: isLoading ? null : _importExcel,
-                        icon: const Icon(Icons.upload),
-                        label: const Text('Import Excel'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.indigo,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
+                      child: _actionButton(
+                        icon: Icons.file_upload_outlined,
+                        label: 'Import Excel',
+                        gradStart: const Color(0xFF3730A3),
+                        gradEnd: AppTheme.primary,
+                        onTap: isLoading ? null : _importExcel,
                       ),
                     ),
                   ],
                 ),
                 if (_statusMessage.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(_statusMessage),
-                    ],
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primarySurface,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            _statusMessage,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ],
@@ -454,20 +488,7 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
                   return Center(child: Text('Error: ${snapshot.error}'));
                 }
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.receipt_long, size: 80, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text(
-                          'No payslip batches yet.\nExport Excel and Import data.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  );
+                  return _emptyState();
                 }
 
                 final docs = snapshot.data!.docs;
@@ -477,87 +498,284 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
                   itemBuilder: (context, index) {
                     final doc = docs[index];
                     final data = doc.data() as Map<String, dynamic>;
-                    final totalEmployees = (data['totalEmployees'] ?? 0) as int;
-                    final totalNetSalary =
-                        (data['totalNetSalary'] ?? 0).toDouble();
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      elevation: 2,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  AdminPayslipBatchDetailPage(
-                                batchId: doc.id,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.indigo.shade50,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Icon(
-                                  Icons.description,
-                                  color: Colors.indigo.shade700,
-                                  size: 28,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      data['month'] ?? '-',
-                                      style: const TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Imported: ${_formatDate(data['importedAt'] as Timestamp?)}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '$totalEmployees staff • ฿ ${_formatNumber(totalNetSalary)}',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        color: Colors.deepPurple,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const Icon(Icons.chevron_right,
-                                  color: Colors.grey),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
+                    return _batchCard(doc.id, data);
                   },
                 );
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    required Color gradStart,
+    required Color gradEnd,
+    required VoidCallback? onTap,
+  }) {
+    final disabled = onTap == null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          decoration: BoxDecoration(
+            gradient: disabled
+                ? null
+                : LinearGradient(colors: [gradStart, gradEnd]),
+            color: disabled ? Colors.grey.shade300 : null,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: disabled
+                ? null
+                : [
+                    BoxShadow(
+                      color: gradEnd.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppTheme.greenStart, AppTheme.greenEnd],
+              ),
+              borderRadius: BorderRadius.circular(28),
+            ),
+            child: const Icon(Icons.receipt_long_outlined,
+                size: 44, color: AppTheme.greenIcon),
+          ),
+          const SizedBox(height: 20),
+          const Text(
+            'No payslip batches yet',
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              'Export Excel → fill data → Import to create your first batch',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _batchCard(String docId, Map<String, dynamic> data) {
+    final totalEmployees = (data['totalEmployees'] ?? 0) as int;
+    final totalNetSalary = (data['totalNetSalary'] ?? 0).toDouble();
+    final month = data['month'] ?? '-';
+    final importedBy = data['importedBy'] ?? '';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.border, width: 0.5),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AdminPayslipBatchDetailPage(batchId: docId),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            AppTheme.greenStart,
+                            AppTheme.greenEnd,
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.description_outlined,
+                        color: AppTheme.greenIcon,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            month,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              const Icon(Icons.access_time,
+                                  size: 11, color: AppTheme.textTertiary),
+                              const SizedBox(width: 3),
+                              Text(
+                                _formatDate(data['importedAt'] as Timestamp?),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppTheme.textTertiary,
+                                ),
+                              ),
+                              if (importedBy.toString().isNotEmpty) ...[
+                                const Text(' · ',
+                                    style: TextStyle(
+                                        color: AppTheme.textTertiary,
+                                        fontSize: 11)),
+                                Text(
+                                  importedBy,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: AppTheme.textTertiary,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right,
+                        color: AppTheme.textTertiary),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.background,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'STAFF',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textTertiary,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '$totalEmployees',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textPrimary,
+                                height: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        width: 1,
+                        height: 36,
+                        color: AppTheme.border,
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'TOTAL NET',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.textTertiary,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '฿ ${_formatNumber(totalNetSalary)}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.primary,
+                                height: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

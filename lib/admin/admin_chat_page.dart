@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../theme.dart';
 import '../group_chat_page.dart';
 import '../private_chat_page.dart';
 
@@ -31,7 +32,7 @@ class AdminChatPage extends StatelessWidget {
   void _showNewChatDialog(BuildContext context, String adminUsername) {
     showDialog(
       context: context,
-      builder: (context) => _NewChatDialog(adminUsername: adminUsername),
+      builder: (ctx) => _NewChatDialog(adminUsername: adminUsername),
     );
   }
 
@@ -41,36 +42,58 @@ class AdminChatPage extends StatelessWidget {
     final adminUsername = user?.email?.split('@').first ?? '';
 
     return Scaffold(
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF1E3A8A),
+                Color(0xFF3730A3),
+                AppTheme.primary,
+              ],
+            ),
+          ),
+        ),
         title: const Text('Chats'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
+          _sectionLabel('GROUP'),
+          const SizedBox(height: 8),
           _buildGroupChatCard(context, adminUsername),
-          const SizedBox(height: 16),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            child: Text(
-              'Private Chats',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-          ),
+          const SizedBox(height: 20),
+          _sectionLabel('DIRECT MESSAGES'),
+          const SizedBox(height: 8),
           _buildPrivateChatsList(context, adminUsername),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: Colors.indigo,
+        backgroundColor: const Color(0xFF3730A3),
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.chat),
-        label: const Text('New Chat'),
+        elevation: 4,
+        icon: const Icon(Icons.chat_outlined),
+        label: const Text('New Chat',
+            style: TextStyle(fontWeight: FontWeight.w600)),
         onPressed: () => _showNewChatDialog(context, adminUsername),
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1,
+          color: AppTheme.textTertiary,
+        ),
       ),
     );
   }
@@ -85,62 +108,39 @@ class AdminChatPage extends StatelessWidget {
           .limit(50)
           .snapshots(),
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return Card(
-            elevation: 2,
-            child: ListTile(
-              leading: const CircleAvatar(
-                backgroundColor: Colors.indigo,
-                child: Icon(Icons.groups, color: Colors.white),
-              ),
-              title: const Text('Group Chat',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: const Text('All staff conversation'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const GroupChatPage(),
-                  ),
-                );
-              },
-            ),
-          );
-        }
-
-        final docs = snapshot.data!.docs;
-
         String lastMessage = 'All staff conversation';
         String lastSender = '';
         String lastSenderId = '';
         Timestamp? lastTime;
         int unreadCount = 0;
 
-        if (docs.isNotEmpty) {
-          final lastDoc = docs.first.data() as Map<String, dynamic>;
-          final text = (lastDoc['text'] ?? '').toString();
-          final imageUrl = lastDoc['imageUrl'];
-          final fileUrl = lastDoc['fileUrl'];
+        if (snapshot.hasData) {
+          final docs = snapshot.data!.docs;
+          if (docs.isNotEmpty) {
+            final lastDoc = docs.first.data() as Map<String, dynamic>;
+            final text = (lastDoc['text'] ?? '').toString();
+            final imageUrl = lastDoc['imageUrl'];
+            final fileUrl = lastDoc['fileUrl'];
 
-          if (text.isNotEmpty) {
-            lastMessage = text;
-          } else if (imageUrl != null) {
-            lastMessage = '📷 Photo';
-          } else if (fileUrl != null) {
-            lastMessage = '📎 ${lastDoc['fileName'] ?? 'File'}';
-          }
+            if (text.isNotEmpty) {
+              lastMessage = text;
+            } else if (imageUrl != null) {
+              lastMessage = '📷 Photo';
+            } else if (fileUrl != null) {
+              lastMessage = '📎 ${lastDoc['fileName'] ?? 'File'}';
+            }
 
-          lastSender = lastDoc['senderName'] ?? '';
-          lastSenderId = lastDoc['senderId'] ?? '';
-          lastTime = lastDoc['sentAt'] as Timestamp?;
+            lastSender = lastDoc['senderName'] ?? '';
+            lastSenderId = lastDoc['senderId'] ?? '';
+            lastTime = lastDoc['sentAt'] as Timestamp?;
 
-          for (final doc in docs) {
-            final data = doc.data() as Map<String, dynamic>;
-            final senderId = data['senderId'] ?? '';
-            final readBy = (data['readBy'] as List<dynamic>?) ?? [];
-            if (senderId != adminUsername && !readBy.contains(adminUsername)) {
-              unreadCount++;
+            for (final doc in docs) {
+              final data = doc.data() as Map<String, dynamic>;
+              final senderId = data['senderId'] ?? '';
+              final readBy = (data['readBy'] as List<dynamic>?) ?? [];
+              if (senderId != adminUsername && !readBy.contains(adminUsername)) {
+                unreadCount++;
+              }
             }
           }
         }
@@ -148,7 +148,7 @@ class AdminChatPage extends StatelessWidget {
         final isUnread = unreadCount > 0;
 
         String previewText = lastMessage;
-        if (lastSender.isNotEmpty && docs.isNotEmpty) {
+        if (lastSender.isNotEmpty && lastTime != null) {
           if (lastSenderId == adminUsername) {
             previewText = 'You: $lastMessage';
           } else {
@@ -156,74 +156,131 @@ class AdminChatPage extends StatelessWidget {
           }
         }
 
-        return Card(
-          elevation: isUnread ? 3 : 2,
-          color: isUnread ? Colors.indigo.shade50 : null,
-          child: ListTile(
-            leading: const CircleAvatar(
-              backgroundColor: Colors.indigo,
-              child: Icon(Icons.groups, color: Colors.white),
+        return Container(
+          decoration: BoxDecoration(
+            gradient: isUnread
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, AppTheme.primarySurface],
+                  )
+                : null,
+            color: isUnread ? null : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isUnread ? AppTheme.primarySoft : AppTheme.border,
+              width: isUnread ? 0.8 : 0.5,
             ),
-            title: Text(
-              'Group Chat',
-              style: TextStyle(
-                fontWeight: isUnread ? FontWeight.bold : FontWeight.w500,
-                color: isUnread ? Colors.black : Colors.grey.shade800,
+            boxShadow: AppTheme.cardShadow,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const GroupChatPage()),
               ),
-            ),
-            subtitle: Text(
-              previewText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isUnread ? Colors.black : Colors.grey.shade500,
-                fontWeight: isUnread ? FontWeight.bold : FontWeight.normal,
-                fontSize: 13,
-              ),
-            ),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  _formatTime(lastTime),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isUnread ? Colors.indigo : Colors.grey.shade600,
-                    fontWeight:
-                        isUnread ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                if (isUnread)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [AppTheme.primaryLight, AppTheme.primary],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primary.withOpacity(0.25),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.groups,
+                          color: Colors.white, size: 24),
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      unreadCount > 9 ? '9+' : '$unreadCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Group Chat',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isUnread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            previewText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isUnread
+                                  ? AppTheme.textPrimary
+                                  : AppTheme.textSecondary,
+                              fontWeight: isUnread
+                                  ? FontWeight.w500
+                                  : FontWeight.normal,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-              ],
-            ),
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const GroupChatPage(),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _formatTime(lastTime),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isUnread
+                                ? AppTheme.primary
+                                : AppTheme.textTertiary,
+                            fontWeight: isUnread
+                                ? FontWeight.w700
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        if (isUnread)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              unreadCount > 9 ? '9+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 18),
+                      ],
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+            ),
           ),
         );
       },
@@ -251,14 +308,35 @@ class AdminChatPage extends StatelessWidget {
           );
         }
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(
-              child: Text(
-                'No private chats yet.\nTap + to start a new chat.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
-              ),
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 30),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.border, width: 0.5),
+            ),
+            child: const Column(
+              children: [
+                Icon(Icons.chat_bubble_outline,
+                    size: 36, color: AppTheme.textTertiary),
+                SizedBox(height: 8),
+                Text(
+                  'No direct messages yet',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                SizedBox(height: 4),
+                Text(
+                  'Tap + to start a new chat',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppTheme.textTertiary,
+                  ),
+                ),
+              ],
             ),
           );
         }
@@ -333,9 +411,7 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
           });
         }
       }
-    } catch (e) {
-      // Keep username as fallback
-    }
+    } catch (_) {}
   }
 
   String _formatTime(Timestamp? timestamp) {
@@ -369,15 +445,14 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
           .where('isRead', isEqualTo: false)
           .snapshots(),
       builder: (context, unreadSnap) {
-        int? unreadCountRaw;
+        int unreadCount = 0;
         if (unreadSnap.hasData) {
-          unreadCountRaw = unreadSnap.data!.docs.where((doc) {
+          unreadCount = unreadSnap.data!.docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             return data['senderId'] != widget.adminUsername;
           }).length;
         }
-        final unreadCount = unreadCountRaw ?? 0;
-        final bool isUnread = unreadCountRaw != null && unreadCountRaw > 0;
+        final isUnread = unreadCount > 0;
 
         String previewText = widget.chatData['lastMessage'] ?? '';
         final lastSenderId = widget.chatData['lastSenderId'];
@@ -385,87 +460,142 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
           previewText = 'You: $previewText';
         }
 
-        return Card(
+        final initial = _displayName.isNotEmpty
+            ? _displayName.substring(0, 1).toUpperCase()
+            : '?';
+
+        return Container(
           margin: const EdgeInsets.only(bottom: 8),
-          elevation: isUnread ? 3 : 1,
-          color: isUnread ? Colors.indigo.shade50 : null,
-          child: ListTile(
-            leading: CircleAvatar(
-              backgroundColor: Colors.deepPurple,
-              child: Text(
-                _displayName.substring(0, 1).toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+          decoration: BoxDecoration(
+            gradient: isUnread
+                ? const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Colors.white, AppTheme.primarySurface],
+                  )
+                : null,
+            color: isUnread ? null : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isUnread ? AppTheme.primarySoft : AppTheme.border,
+              width: isUnread ? 0.8 : 0.5,
             ),
-            title: Text(
-              _displayName,
-              style: TextStyle(
-                fontWeight:
-                    isUnread ? FontWeight.bold : FontWeight.w500,
-                color: isUnread ? Colors.black : Colors.grey.shade800,
-              ),
-            ),
-            subtitle: Text(
-              previewText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: isUnread ? Colors.black : Colors.grey.shade500,
-                fontWeight:
-                    isUnread ? FontWeight.bold : FontWeight.normal,
-                fontSize: 13,
-              ),
-            ),
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  _formatTime(widget.chatData['lastMessageAt'] as Timestamp?),
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isUnread ? Colors.indigo : Colors.grey.shade600,
-                    fontWeight:
-                        isUnread ? FontWeight.bold : FontWeight.normal,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                if (isUnread)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      unreadCount > 9 ? '9+' : '$unreadCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            onTap: () {
-              Navigator.push(
+            boxShadow: AppTheme.cardShadow,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => PrivateChatPage(
+                  builder: (_) => PrivateChatPage(
                     chatId: widget.chatId,
                     otherUsername: widget.otherUsername,
                     otherDisplayName: _displayName,
                   ),
                 ),
-              );
-            },
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppTheme.pinkStart, AppTheme.pinkEnd],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        initial,
+                        style: const TextStyle(
+                          color: AppTheme.pinkIcon,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _displayName,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isUnread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            previewText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isUnread
+                                  ? AppTheme.textPrimary
+                                  : AppTheme.textSecondary,
+                              fontWeight: isUnread
+                                  ? FontWeight.w500
+                                  : FontWeight.normal,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _formatTime(
+                              widget.chatData['lastMessageAt'] as Timestamp?),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isUnread
+                                ? AppTheme.primary
+                                : AppTheme.textTertiary,
+                            fontWeight: isUnread
+                                ? FontWeight.w700
+                                : FontWeight.normal,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        if (isUnread)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              unreadCount > 9 ? '9+' : '$unreadCount',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          )
+                        else
+                          const SizedBox(height: 18),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         );
       },
@@ -485,8 +615,8 @@ class _NewChatDialog extends StatefulWidget {
 class _NewChatDialogState extends State<_NewChatDialog> {
   String _searchQuery = '';
 
-  void _startChat(BuildContext context, String otherUsername,
-      String otherDisplayName) {
+  void _startChat(
+      BuildContext context, String otherUsername, String otherDisplayName) {
     final ids = [widget.adminUsername, otherUsername]..sort();
     final chatId = ids.join('_');
 
@@ -494,7 +624,7 @@ class _NewChatDialogState extends State<_NewChatDialog> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => PrivateChatPage(
+        builder: (_) => PrivateChatPage(
           chatId: chatId,
           otherUsername: otherUsername,
           otherDisplayName: otherDisplayName,
@@ -506,6 +636,7 @@ class _NewChatDialogState extends State<_NewChatDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
         constraints: const BoxConstraints(maxWidth: 400, maxHeight: 600),
         padding: const EdgeInsets.all(16),
@@ -515,36 +646,61 @@ class _NewChatDialogState extends State<_NewChatDialog> {
           children: [
             Row(
               children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF3730A3), AppTheme.primary],
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.chat_outlined,
+                      color: Colors.white, size: 18),
+                ),
+                const SizedBox(width: 10),
                 const Expanded(
                   child: Text(
                     'Start New Chat',
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(Icons.close, size: 20),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            TextField(
-              decoration: InputDecoration(
-                hintText: 'Search staff...',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            const SizedBox(height: 12),
+            Container(
+              decoration: BoxDecoration(
+                color: AppTheme.background,
+                borderRadius: BorderRadius.circular(12),
               ),
-              onChanged: (value) {
-                setState(() => _searchQuery = value.toLowerCase());
-              },
+              child: TextField(
+                style: const TextStyle(
+                    fontSize: 14, color: AppTheme.textPrimary),
+                decoration: const InputDecoration(
+                  hintText: 'Search staff...',
+                  hintStyle: TextStyle(
+                    color: AppTheme.textTertiary,
+                    fontSize: 13,
+                  ),
+                  prefixIcon: Icon(Icons.search,
+                      size: 20, color: AppTheme.textSecondary),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(vertical: 14),
+                ),
+                onChanged: (value) {
+                  setState(() => _searchQuery = value.toLowerCase());
+                },
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             Flexible(
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
@@ -572,7 +728,6 @@ class _NewChatDialogState extends State<_NewChatDialog> {
                         return false;
                       }
                     }
-
                     return true;
                   }).toList();
 
@@ -585,7 +740,10 @@ class _NewChatDialogState extends State<_NewChatDialog> {
                   });
 
                   if (users.isEmpty) {
-                    return const Center(child: Text('No users found'));
+                    return const Center(
+                      child: Text('No users found',
+                          style: TextStyle(color: AppTheme.textTertiary)),
+                    );
                   }
 
                   return ListView.builder(
@@ -598,23 +756,110 @@ class _NewChatDialogState extends State<_NewChatDialog> {
                       final displayName =
                           data['displayName']?.toString() ?? username;
                       final isAdmin = data['role'] == 'admin';
+                      final initial = displayName.isNotEmpty
+                          ? displayName.substring(0, 1).toUpperCase()
+                          : '?';
 
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor:
-                              isAdmin ? Colors.indigo : Colors.deepPurple,
-                          child: Text(
-                            displayName.substring(0, 1).toUpperCase(),
-                            style: const TextStyle(color: Colors.white),
+                      return Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () =>
+                              _startChat(context, username, displayName),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: isAdmin
+                                          ? const [
+                                              Color(0xFF1E3A8A),
+                                              Color(0xFF3730A3)
+                                            ]
+                                          : [
+                                              AppTheme.pinkStart,
+                                              AppTheme.pinkEnd
+                                            ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    initial,
+                                    style: TextStyle(
+                                      color: isAdmin
+                                          ? Colors.white
+                                          : AppTheme.pinkIcon,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              displayName,
+                                              style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppTheme.textPrimary,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          if (isAdmin) ...[
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 1,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF3730A3)
+                                                    .withOpacity(0.12),
+                                                borderRadius:
+                                                    BorderRadius.circular(5),
+                                              ),
+                                              child: const Text(
+                                                'ADMIN',
+                                                style: TextStyle(
+                                                  fontSize: 8,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Color(0xFF3730A3),
+                                                  letterSpacing: 0.5,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '@$username${isAdmin ? '' : ' · ${data['department'] ?? '-'}'}',
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: AppTheme.textTertiary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                        title: Text(displayName),
-                        subtitle: Text(
-                          '@$username${isAdmin ? ' • ADMIN' : ' • ${data['department'] ?? '-'}'}',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        onTap: () =>
-                            _startChat(context, username, displayName),
                       );
                     },
                   );

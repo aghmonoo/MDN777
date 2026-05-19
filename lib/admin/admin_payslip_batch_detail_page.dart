@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'dart:typed_data';
 import 'dart:html' as html;
+import '../theme.dart';
 
 class AdminPayslipBatchDetailPage extends StatefulWidget {
   final String batchId;
@@ -48,7 +49,6 @@ class _AdminPayslipBatchDetailPageState
     setState(() => _isDownloading = true);
 
     try {
-      // Fetch all payslips in this batch
       final snapshot = await FirebaseFirestore.instance
           .collection('payslips')
           .where('batchId', isEqualTo: widget.batchId)
@@ -103,53 +103,37 @@ class _AdminPayslipBatchDetailPageState
         final data = snapshot.docs[i].data();
         final rowIndex = i + 1;
 
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: rowIndex))
             .value = TextCellValue(data['employeeId']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: rowIndex))
             .value = TextCellValue(data['username']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: rowIndex))
             .value = TextCellValue(data['displayName']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: rowIndex))
             .value = TextCellValue(data['department']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: rowIndex))
             .value = TextCellValue(data['bankName']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 5, rowIndex: rowIndex))
             .value = TextCellValue(data['accountNumber']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 6, rowIndex: rowIndex))
             .value = TextCellValue(data['accountHolderName']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: rowIndex))
             .value = TextCellValue(data['month']?.toString() ?? '');
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 8, rowIndex: rowIndex))
             .value = DoubleCellValue((data['basicSalary'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 9, rowIndex: rowIndex))
             .value = DoubleCellValue((data['allowance'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: rowIndex))
             .value = DoubleCellValue((data['kpiBonus'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 11, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 11, rowIndex: rowIndex))
             .value = DoubleCellValue((data['socialSecurity'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 12, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 12, rowIndex: rowIndex))
             .value = DoubleCellValue((data['leaveDeduction'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 13, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 13, rowIndex: rowIndex))
             .value = DoubleCellValue((data['lateMinutes'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 14, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 14, rowIndex: rowIndex))
             .value = DoubleCellValue((data['lateAmount'] ?? 0).toDouble());
-        sheet
-            .cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
             .value = DoubleCellValue((data['netSalary'] ?? 0).toDouble());
       }
 
@@ -183,14 +167,15 @@ class _AdminPayslipBatchDetailPageState
   Future<void> _deleteBatch(BuildContext context) async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Delete Batch'),
         content: const Text(
-          'This will delete the entire batch and all employee payslips in it. This cannot be undone.',
+          'Delete entire batch and all payslips in it?\n\nThis cannot be undone.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
@@ -198,7 +183,7 @@ class _AdminPayslipBatchDetailPageState
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
             ),
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete All'),
           ),
         ],
@@ -217,7 +202,6 @@ class _AdminPayslipBatchDetailPageState
       for (final doc in payslipsSnapshot.docs) {
         batch.delete(doc.reference);
       }
-
       batch.delete(FirebaseFirestore.instance
           .collection('payslip_batches')
           .doc(widget.batchId));
@@ -245,18 +229,7 @@ class _AdminPayslipBatchDetailPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.indigo,
-        foregroundColor: Colors.white,
-        title: const Text('Batch Detail'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete),
-            tooltip: 'Delete batch',
-            onPressed: () => _deleteBatch(context),
-          ),
-        ],
-      ),
+      backgroundColor: AppTheme.background,
       body: FutureBuilder<DocumentSnapshot>(
         future: FirebaseFirestore.instance
             .collection('payslip_batches')
@@ -279,266 +252,512 @@ class _AdminPayslipBatchDetailPageState
           final totalNetSalary = (data['totalNetSalary'] ?? 0).toDouble();
           final departmentBreakdown =
               (data['departmentBreakdown'] as Map<String, dynamic>?) ?? {};
+          final importedBy = data['importedBy'] ?? 'admin';
+          final importedAt = data['importedAt'] as Timestamp?;
 
-          return SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  color: Colors.indigo.shade50,
+          return CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                expandedHeight: 200,
+                pinned: true,
+                backgroundColor: const Color(0xFF3730A3),
+                foregroundColor: Colors.white,
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () => _deleteBatch(context),
+                  ),
+                ],
+                flexibleSpace: FlexibleSpaceBar(
+                  background: _buildHero(
+                    batchMonth,
+                    importedAt,
+                    importedBy.toString(),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Transform.translate(
+                  offset: const Offset(0, -24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        batchMonth,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(Icons.access_time,
-                              size: 14, color: Colors.grey.shade700),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Imported: ${_formatDate(data['importedAt'] as Timestamp?)}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey.shade700,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Icon(Icons.person,
-                              size: 14, color: Colors.grey.shade700),
-                          const SizedBox(width: 4),
-                          Text(
-                            'By: ${data['importedBy'] ?? 'admin'}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey.shade700,
-                            ),
-                          ),
-                        ],
-                      ),
+                      _buildDownloadCard(batchMonth),
                       const SizedBox(height: 16),
-                      // Download Button
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _isDownloading
-                              ? null
-                              : () => _downloadBatchExcel(batchMonth),
-                          icon: _isDownloading
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.download),
-                          label: Text(_isDownloading
-                              ? 'Downloading...'
-                              : 'Download Excel'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                        ),
-                      ),
+                      _buildStatsRow(totalEmployees, totalNetSalary),
+                      const SizedBox(height: 20),
+                      if (departmentBreakdown.isNotEmpty) ...[
+                        _sectionLabel('DEPARTMENT BREAKDOWN'),
+                        const SizedBox(height: 8),
+                        _buildDepartmentList(departmentBreakdown),
+                        const SizedBox(height: 20),
+                      ],
+                      _sectionLabel('EMPLOYEES'),
+                      const SizedBox(height: 8),
+                      _buildEmployeesList(),
+                      const SizedBox(height: 24),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _buildStatCard(
-                          icon: Icons.people,
-                          label: 'Total Staff',
-                          value: '$totalEmployees',
-                          color: Colors.blue,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildStatCard(
-                          icon: Icons.payments,
-                          label: 'Total Salary',
-                          value: '฿ ${_formatNumber(totalNetSalary)}',
-                          color: Colors.green,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'Department Breakdown',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Card(
-                    child: Column(
-                      children: departmentBreakdown.entries.map((entry) {
-                        return ListTile(
-                          leading: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.indigo.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.business,
-                              color: Colors.indigo.shade700,
-                              size: 20,
-                            ),
-                          ),
-                          title: Text(entry.key),
-                          trailing: Text(
-                            '${entry.value} ${entry.value == 1 ? 'person' : 'people'}',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w500,
-                              color: Colors.deepPurple,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'Employees',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('payslips')
-                      .where('batchId', isEqualTo: widget.batchId)
-                      .snapshots(),
-                  builder: (context, payslipSnapshot) {
-                    if (payslipSnapshot.connectionState ==
-                        ConnectionState.waiting) {
-                      return const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    }
-
-                    final docs = payslipSnapshot.data?.docs ?? [];
-                    if (docs.isEmpty) {
-                      return const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Text('No payslips in this batch'),
-                      );
-                    }
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Column(
-                        children: docs.map((doc) {
-                          final pData = doc.data() as Map<String, dynamic>;
-                          final netSalary =
-                              (pData['netSalary'] ?? 0).toDouble();
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: ListTile(
-                              title: Text(
-                                pData['displayName'] ?? '-',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              subtitle: Text(
-                                '${pData['employeeId'] ?? '-'} • ${pData['department'] ?? '-'}',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              trailing: Text(
-                                '฿ ${_formatNumber(netSalary)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.deepPurple,
-                                ),
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 24),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
     );
   }
 
-  Widget _buildStatCard({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-  }) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-              ),
-            ),
+  Widget _buildHero(String month, Timestamp? importedAt, String importedBy) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF1E3A8A),
+            Color(0xFF3730A3),
+            AppTheme.primary,
           ],
         ),
       ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -40,
+            right: -50,
+            child: Container(
+              width: 180,
+              height: 180,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 56, 20, 36),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text(
+                      'PAY SLIP BATCH',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    month,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(Icons.access_time,
+                          size: 12,
+                          color: Colors.white.withOpacity(0.85)),
+                      const SizedBox(width: 4),
+                      Text(
+                        _formatDate(importedAt),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Icon(Icons.person_outline,
+                          size: 12,
+                          color: Colors.white.withOpacity(0.85)),
+                      const SizedBox(width: 4),
+                      Text(
+                        importedBy,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDownloadCard(String batchMonth) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: _isDownloading ? null : () => _downloadBatchExcel(batchMonth),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF10B981), Color(0xFF059669)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF059669).withOpacity(0.3),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: _isDownloading
+                      ? const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Icon(Icons.file_download_outlined,
+                          color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _isDownloading ? 'Downloading...' : 'Download Excel',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Export full batch data',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward,
+                    color: Colors.white, size: 18),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsRow(int totalEmployees, double totalNetSalary) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: _statCard(
+              icon: Icons.people_outline,
+              label: 'Total Staff',
+              value: '$totalEmployees',
+              gradStart: AppTheme.blueStart,
+              gradEnd: AppTheme.blueEnd,
+              iconColor: AppTheme.blueIcon,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _statCard(
+              icon: Icons.payments_outlined,
+              label: 'Total Net',
+              value: '฿ ${_formatNumber(totalNetSalary)}',
+              gradStart: AppTheme.greenStart,
+              gradEnd: AppTheme.greenEnd,
+              iconColor: AppTheme.greenIcon,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color gradStart,
+    required Color gradEnd,
+    required Color iconColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.border, width: 0.5),
+        boxShadow: AppTheme.cardShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [gradStart, gradEnd]),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: iconColor, size: 18),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
+              height: 1.1,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppTheme.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1,
+          color: AppTheme.textTertiary,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDepartmentList(Map<String, dynamic> departments) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.border, width: 0.5),
+          boxShadow: AppTheme.cardShadow,
+        ),
+        child: Column(
+          children: departments.entries.toList().asMap().entries.map((e) {
+            final isLast = e.key == departments.length - 1;
+            final entry = e.value;
+            final count = entry.value as int;
+            return Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: isLast
+                      ? BorderSide.none
+                      : const BorderSide(color: AppTheme.border, width: 0.5),
+                ),
+              ),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF3730A3), AppTheme.primary],
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.business_outlined,
+                        color: Colors.white, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      entry.key,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primarySurface,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '$count ${count == 1 ? 'person' : 'people'}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmployeesList() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('payslips')
+          .where('batchId', isEqualTo: widget.batchId)
+          .snapshots(),
+      builder: (context, payslipSnapshot) {
+        if (payslipSnapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final docs = payslipSnapshot.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No payslips in this batch'),
+          );
+        }
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: docs.map((doc) {
+              final pData = doc.data() as Map<String, dynamic>;
+              final netSalary = (pData['netSalary'] ?? 0).toDouble();
+              final displayName = pData['displayName'] ?? '-';
+              final initial = displayName.toString().isNotEmpty
+                  ? displayName.toString().substring(0, 1).toUpperCase()
+                  : '?';
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.border, width: 0.5),
+                  boxShadow: AppTheme.cardShadow,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppTheme.pinkStart, AppTheme.pinkEnd],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        initial,
+                        style: const TextStyle(
+                          color: AppTheme.pinkIcon,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayName,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${pData['employeeId'] ?? '-'} · ${pData['department'] ?? '-'}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppTheme.textTertiary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Text(
+                      '฿ ${_formatNumber(netSalary)}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        );
+      },
     );
   }
 }

@@ -69,7 +69,6 @@ class AnnouncementsPage extends StatelessWidget {
               final data = doc.data() as Map<String, dynamic>;
               final readBy = (data['readBy'] as List?) ?? [];
               final isUnread = !readBy.contains(username);
-              debugPrint('[ANN] title=${data['title']} | username=$username | readBy=$readBy | isUnread=$isUnread');
 
               final imageUrls =
                   (data['imageUrls'] as List<dynamic>?)?.cast<String>() ??
