@@ -1,0 +1,46 @@
+name: Build and deploy web
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build web
+        run: flutter build web --release --base-href /app/
+
+      - name: Assemble hosting folder
+        run: |
+          rm -rf hosting/app
+          mkdir -p hosting/app hosting/downloads
+          cp -r build/web/. hosting/app/
+          # Keep whatever APK is already published; a hosting deploy replaces
+          # the whole site, so the file has to be present in this build.
+          curl -fsSL https://sc-cnx.web.app/downloads/StaffConnect.apk \
+            -o hosting/downloads/StaffConnect.apk || \
+            echo "No published APK to carry over."
+
+      - name: Deploy to Firebase Hosting
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MDN777_BBED6 }}
+        run: |
+          printf '%s' "$SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          npx --yes firebase-tools@latest deploy \
+            --only hosting \
+            --project mdn777-bbed6 \
+            --non-interactive
