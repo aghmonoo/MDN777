@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'push_notifications.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -124,11 +126,17 @@ class _GroupChatPageState extends State<GroupChatPage> {
         };
       }
 
-      await FirebaseFirestore.instance
+      final msgRef = await FirebaseFirestore.instance
           .collection('groups')
           .doc('general')
           .collection('messages')
           .add(messageData);
+
+      unawaited(PushNotifications.notify({
+        'type': 'group',
+        'groupId': 'general',
+        'msgId': msgRef.id,
+      }));
 
       setState(() {
         _replyTo = null;

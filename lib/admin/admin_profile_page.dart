@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../push_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme.dart';
 
@@ -665,6 +666,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
               if (context.mounted) {
                 Navigator.of(context).popUntil((route) => route.isFirst);
               }
+              await PushNotifications.stop();
               await FirebaseAuth.instance.signOut();
             },
             child: const Text('Logout'),

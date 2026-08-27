@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,6 +10,7 @@ import 'admin/admin_main_screen.dart';
 import 'theme.dart';
 import 'home_screen.dart';
 import 'version_gate.dart';
+import 'push_notifications.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +22,8 @@ void main() async {
     persistenceEnabled: true,
     cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
+
+  PushNotifications.registerBackgroundHandler();
 
   runApp(const MyApp());
 }
@@ -89,7 +94,10 @@ class _RoleRouterState extends State<RoleRouter> {
     final username = user.email?.split('@').first ?? '';
 
     final byUid = await db.collection('users').doc(uid).get();
-    if (byUid.exists) return byUid.data();
+    if (byUid.exists) {
+      unawaited(PushNotifications.start());
+      return byUid.data();
+    }
 
     final legacyQuery = await db
         .collection('users')
@@ -112,6 +120,7 @@ class _RoleRouterState extends State<RoleRouter> {
       // works from the legacy document.
     }
 
+    unawaited(PushNotifications.start());
     return data;
   }
 
@@ -184,7 +193,10 @@ class _RoleRouterState extends State<RoleRouter> {
               ),
               const SizedBox(height: 26),
               ElevatedButton.icon(
-                onPressed: () => FirebaseAuth.instance.signOut(),
+                onPressed: () async {
+                  await PushNotifications.stop();
+                  await FirebaseAuth.instance.signOut();
+                },
                 icon: const Icon(Icons.logout, size: 18),
                 label: const Text('Logout'),
               ),

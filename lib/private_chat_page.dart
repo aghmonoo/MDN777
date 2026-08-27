@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'push_notifications.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -149,7 +151,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         };
       }
 
-      await chatRef.collection('messages').add(messageData);
+      final msgRef = await chatRef.collection('messages').add(messageData);
+
+      unawaited(PushNotifications.notify({
+        'type': 'chat',
+        'chatId': widget.chatId,
+        'msgId': msgRef.id,
+      }));
 
       String lastMessage = text ?? '';
       if (lastMessage.isEmpty) {

@@ -83,3 +83,197 @@ exports.adminDeleteAuthUser = onCall(async (request) => {
     throw new HttpsError("internal", e.message);
   }
 });
+
+
+// ---------------------------------------------------------------------------
+// Push notifications
+// ---------------------------------------------------------------------------
+
+const db = () => admin.firestore();
+
+/** Collects push tokens, optionally skipping one username. */
+async function tokensForAll(excludeUsername) {
+  const snap = await db().collection("users").get();
+  const tokens = [];
+  snap.forEach((doc) => {
+    const data = doc.data();
+    if (excludeUsername && data.username === excludeUsername) return;
+    (data.fcmTokens || []).forEach((t) => {
+      if (t) tokens.push({token: t, uid: doc.id});
+    });
+  });
+  return tokens;
+}
+
+/** Collects push tokens for a list of usernames. */
+async function tokensForUsernames(usernames) {
+  const wanted = [...new Set(usernames.filter(Boolean))];
+  if (!wanted.length) return [];
+
+  const tokens = [];
+  for (let i = 0; i < wanted.length; i += 10) {
+    const chunk = wanted.slice(i, i + 10);
+    const snap = await db()
+        .collection("users")
+        .where("username", "in", chunk)
+        .get();
+    snap.forEach((doc) => {
+      (doc.data().fcmTokens || []).forEach((t) => {
+        if (t) tokens.push({token: t, uid: doc.id});
+      });
+    });
+  }
+  return tokens;
+}
+
+/** Sends one notification and prunes tokens the device no longer accepts. */
+async function push(entries, title, body, data) {
+  if (!entries.length) return;
+
+  const tokens = entries.map((e) => e.token);
+  const response = await admin.messaging().sendEachForMulticast({
+    tokens: tokens,
+    notification: {title: title, body: body},
+    data: Object.assign({click_action: "FLUTTER_NOTIFICATION_CLICK"}, data || {}),
+    android: {priority: "high", notification: {channelId: "staff_connect_high"}},
+  });
+
+  const dead = [];
+  response.responses.forEach((r, i) => {
+    if (r.success) return;
+    const code = r.error && r.error.code;
+    if (code === "messaging/registration-token-not-registered" ||
+        code === "messaging/invalid-registration-token") {
+      dead.push(entries[i]);
+    }
+  });
+
+  await Promise.all(dead.map((e) =>
+    db().collection("users").doc(e.uid).update({
+      fcmTokens: admin.firestore.FieldValue.arrayRemove(e.token),
+    }).catch(() => null),
+  ));
+}
+
+/** Shortens a message for the notification body. */
+function preview(text, fallback) {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return fallback;
+  return clean.length > 120 ? `${clean.slice(0, 117)}...` : clean;
+}
+
+/**
+ * Sends push notifications for an event the caller has just written.
+ *
+ * The Firestore database lives in a region without Eventarc trigger support,
+ * so the app asks for the notification instead of a background trigger firing.
+ * Every branch re-reads the document server-side, so the text that goes out is
+ * the text that was stored.
+ *
+ * data: { type: "announcement" | "group" | "chat" | "payslip_batch", ... }
+ */
+exports.notify = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) throw new HttpsError("unauthenticated", "Sign in required.");
+
+  const me = String(auth.token.email || "").split("@")[0];
+  const type = String(request.data.type || "");
+
+  const isAdmin = async () => {
+    const snap = await db().collection("users").doc(auth.uid).get();
+    return snap.exists && snap.data().role === "admin";
+  };
+
+  if (type === "announcement") {
+    if (!(await isAdmin())) {
+      throw new HttpsError("permission-denied", "Admin only.");
+    }
+    const id = String(request.data.announcementId || "");
+    const doc = await db().collection("announcements").doc(id).get();
+    if (!doc.exists) throw new HttpsError("not-found", "Announcement missing.");
+    const data = doc.data();
+
+    await push(
+        await tokensForAll(me),
+        data.title || "New announcement",
+        preview(data.body, "New announcement"),
+        {type: "announcement", id: id},
+    );
+    return {ok: true};
+  }
+
+  if (type === "group") {
+    const groupId = String(request.data.groupId || "general");
+    const msgId = String(request.data.msgId || "");
+    const doc = await db()
+        .collection("groups").doc(groupId)
+        .collection("messages").doc(msgId)
+        .get();
+    if (!doc.exists) throw new HttpsError("not-found", "Message missing.");
+
+    const data = doc.data();
+    if (data.senderId !== me) {
+      throw new HttpsError("permission-denied", "Not your message.");
+    }
+
+    await push(
+        await tokensForAll(me),
+        `${data.senderName || me} - group chat`,
+        preview(data.text, "Sent an attachment"),
+        {type: "group", groupId: groupId},
+    );
+    return {ok: true};
+  }
+
+  if (type === "chat") {
+    const chatId = String(request.data.chatId || "");
+    const msgId = String(request.data.msgId || "");
+
+    const chat = await db().collection("chats").doc(chatId).get();
+    if (!chat.exists) throw new HttpsError("not-found", "Chat missing.");
+
+    const participants = chat.data().participants || [];
+    if (!participants.includes(me)) {
+      throw new HttpsError("permission-denied", "Not in this chat.");
+    }
+
+    const doc = await db()
+        .collection("chats").doc(chatId)
+        .collection("messages").doc(msgId)
+        .get();
+    if (!doc.exists) throw new HttpsError("not-found", "Message missing.");
+
+    const data = doc.data();
+    if (data.senderId !== me) {
+      throw new HttpsError("permission-denied", "Not your message.");
+    }
+
+    const others = participants.filter((p) => p && p !== me);
+    await push(
+        await tokensForUsernames(others),
+        data.senderName || me,
+        preview(data.text, "Sent an attachment"),
+        {type: "chat", chatId: chatId},
+    );
+    return {ok: true};
+  }
+
+  if (type === "payslip_batch") {
+    if (!(await isAdmin())) {
+      throw new HttpsError("permission-denied", "Admin only.");
+    }
+    const id = String(request.data.batchId || "");
+    const doc = await db().collection("payslip_batches").doc(id).get();
+    if (!doc.exists) throw new HttpsError("not-found", "Batch missing.");
+
+    await push(
+        await tokensForAll(me),
+        "Payslips available",
+        `Your payslip for ${doc.data().month || "this period"} is ready.`,
+        {type: "payslip", id: id},
+    );
+    return {ok: true};
+  }
+
+  throw new HttpsError("invalid-argument", `Unknown type: ${type}`);
+});

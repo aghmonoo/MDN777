@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../push_notifications.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
@@ -315,6 +317,13 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         'totalNetSalary': totalNetSalary,
         'departmentBreakdown': departmentCount,
       });
+
+      if (successCount > 0) {
+        unawaited(PushNotifications.notify({
+          'type': 'payslip_batch',
+          'batchId': batchRef.id,
+        }));
+      }
 
       if (mounted) {
         _showImportResult(successCount, errors);

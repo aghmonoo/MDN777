@@ -54,7 +54,8 @@ service cloud.firestore {
                  'accountHolderName',
                  'documents',
                  'uid',
-                 'groupLastReadAt'
+                 'groupLastReadAt',
+                 'fcmTokens'
                ]));
     }
 

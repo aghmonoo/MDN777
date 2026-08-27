@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../push_notifications.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';
 import '../cloudinary_config.dart';
@@ -199,9 +201,13 @@ class _AdminAnnouncementEditPageState
             .update(data);
       } else {
         data['createdAt'] = FieldValue.serverTimestamp();
-        await FirebaseFirestore.instance
+        final ref = await FirebaseFirestore.instance
             .collection('announcements')
             .add(data);
+        unawaited(PushNotifications.notify({
+          'type': 'announcement',
+          'announcementId': ref.id,
+        }));
       }
 
       if (mounted) {

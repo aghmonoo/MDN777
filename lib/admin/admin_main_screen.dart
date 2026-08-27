@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../push_notifications.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme.dart';
 import 'admin_announcements_page.dart';
@@ -91,6 +92,7 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
+      await PushNotifications.stop();
       await FirebaseAuth.instance.signOut();
     }
   }
