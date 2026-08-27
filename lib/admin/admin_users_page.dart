@@ -3,12 +3,14 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
-import 'dart:html' as html;
+import '../file_download_helper.dart';
 import '../theme.dart';
 import 'admin_user_edit_page.dart';
+import 'recycle_bin.dart';
 
 class AdminUsersPage extends StatefulWidget {
   const AdminUsersPage({super.key});
@@ -23,6 +25,126 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   final _searchController = TextEditingController();
   bool _isImporting = false;
   String _importStatus = '';
+
+  bool _selectionMode = false;
+  bool _isDeleting = false;
+  final Set<String> _selectedIds = {};
+  List<String> _selectableVisibleIds = [];
+  String _myUsername = '';
+
+  late final Stream<QuerySnapshot> _usersStream;
+  final ScrollController _listController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _myUsername =
+        FirebaseAuth.instance.currentUser?.email?.split('@').first ?? '';
+    _usersStream = FirebaseFirestore.instance.collection('users').snapshots();
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelect(String docId) {
+    setState(() {
+      if (_selectedIds.contains(docId)) {
+        _selectedIds.remove(docId);
+      } else {
+        _selectedIds.add(docId);
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Delete ${ids.length} user(s)'),
+        content: const Text(
+          'Selected user profiles are moved to the Recycle Bin and can be '
+          'restored within 30 days.\n\n'
+          'Note: Login (auth) accounts must still be deleted manually from '
+          'Firebase Console.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isDeleting = true);
+
+    int deleted = 0;
+    try {
+      final db = FirebaseFirestore.instance;
+      for (var i = 0; i < ids.length; i += 200) {
+        final end = (i + 200 > ids.length) ? ids.length : i + 200;
+        final chunk = ids.sublist(i, end);
+        final writeBatch = db.batch();
+        for (final id in chunk) {
+          final ref = db.collection('users').doc(id);
+          final snap = await ref.get();
+          if (!snap.exists) continue;
+          final data = snap.data() ?? <String, dynamic>{};
+          writeBatch.set(
+            RecycleBin.newRef(),
+            RecycleBin.entry(
+              type: 'user',
+              originalPath: 'users/$id',
+              data: data,
+              label: (data['displayName'] ?? id).toString(),
+              sublabel: '@${data['username'] ?? '-'} - ${data['role'] ?? '-'}',
+            ),
+          );
+          writeBatch.delete(ref);
+          deleted++;
+        }
+        await writeBatch.commit();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isDeleting = false;
+        _selectionMode = false;
+        _selectedIds.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$deleted user(s) moved to Recycle Bin'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
 
   Future<void> _deleteUser(String docId, String displayName) async {
     final confirm = await showDialog<bool>(
@@ -53,14 +175,29 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     if (confirm != true) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(docId)
-          .delete();
+      final db = FirebaseFirestore.instance;
+      final ref = db.collection('users').doc(docId);
+      final snap = await ref.get();
+      final data = snap.data() ?? <String, dynamic>{};
+
+      final writeBatch = db.batch();
+      writeBatch.set(
+        RecycleBin.newRef(),
+        RecycleBin.entry(
+          type: 'user',
+          originalPath: 'users/$docId',
+          data: data,
+          label: (data['displayName'] ?? displayName).toString(),
+          sublabel: '@${data['username'] ?? '-'} - ${data['role'] ?? '-'}',
+        ),
+      );
+      writeBatch.delete(ref);
+      await writeBatch.commit();
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('User deleted'),
+            content: Text('User moved to Recycle Bin'),
             backgroundColor: Colors.green,
           ),
         );
@@ -75,32 +212,130 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   }
 
   Future<void> _resetPassword(String username) async {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Password reset for @$username must be done in Firebase Console → Authentication',
-          ),
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    }
+    if (username.isEmpty) return;
+
+    final controller = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool obscure = true;
+    bool busy = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            Future<void> submit() async {
+              if (!formKey.currentState!.validate()) return;
+              setDialogState(() => busy = true);
+              try {
+                final callable = FirebaseFunctions.instanceFor(
+                  region: 'asia-southeast1',
+                ).httpsCallable('adminSetPassword');
+                await callable.call<Map<String, dynamic>>({
+                  'username': username,
+                  'newPassword': controller.text,
+                });
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Password updated for @$username'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } on FirebaseFunctionsException catch (e) {
+                setDialogState(() => busy = false);
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(content: Text(e.message ?? e.code)),
+                  );
+                }
+              } catch (e) {
+                setDialogState(() => busy = false);
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(content: Text('Error: $e')),
+                  );
+                }
+              }
+            }
+
+            return AlertDialog(
+              title: Text('Reset password - @$username'),
+              content: Form(
+                key: formKey,
+                child: TextFormField(
+                  controller: controller,
+                  autofocus: true,
+                  obscureText: obscure,
+                  decoration: InputDecoration(
+                    labelText: 'New password',
+                    helperText: 'At least 6 characters',
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscure ? Icons.visibility : Icons.visibility_off,
+                        size: 20,
+                      ),
+                      onPressed: () =>
+                          setDialogState(() => obscure = !obscure),
+                    ),
+                  ),
+                  validator: (v) => (v ?? '').length < 6
+                      ? 'At least 6 characters'
+                      : null,
+                  onFieldSubmitted: (_) => busy ? null : submit(),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed:
+                      busy ? null : () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: busy ? null : submit,
+                  child: busy
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Update'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    controller.dispose();
   }
 
-  void _downloadFile(Uint8List bytes, String filename) {
-    final blob = html.Blob([bytes]);
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute('download', filename)
-      ..click();
-    html.Url.revokeObjectUrl(url);
+  
+
+  DateTime? _parseDate(String raw) {
+    if (raw.isEmpty) return null;
+    final direct = DateTime.tryParse(raw);
+    if (direct != null) return direct;
+    final m = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(raw);
+    if (m != null) {
+      return DateTime(
+        int.parse(m.group(3)!),
+        int.parse(m.group(2)!),
+        int.parse(m.group(1)!),
+      );
+    }
+    return null;
   }
 
   Future<void> _downloadTemplate() async {
     try {
       final data = await rootBundle.load('assets/users_template.xlsx');
       final bytes = data.buffer.asUint8List();
-      _downloadFile(bytes, 'users_template.xlsx');
+      downloadFile(bytes, 'users_template.xlsx');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -157,14 +392,38 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         final row = sheet.rows[i];
         if (row.isEmpty) continue;
 
-        final username = (row[0]?.value?.toString() ?? '').trim();
-        final password = (row[1]?.value?.toString() ?? '').trim();
-        final displayName = (row[2]?.value?.toString() ?? '').trim();
-        final employeeId = (row[3]?.value?.toString() ?? '').trim();
-        final role = (row[4]?.value?.toString() ?? 'employee').trim();
-        final department = (row[5]?.value?.toString() ?? '').trim();
-        final batch = (row[6]?.value?.toString() ?? '').trim();
-        final joinDate = (row[7]?.value?.toString() ?? '').trim();
+        String cellAt(int i) =>
+            (i < row.length ? row[i]?.value?.toString() ?? '' : '').trim();
+
+        final email = cellAt(0);
+        final usernameCell = cellAt(1);
+
+        // username is derived from the company email when one is given;
+        // the template keeps a preview formula in that column.
+        final username = email.contains('@')
+            ? email.split('@').first.trim().toLowerCase()
+            : (usernameCell.startsWith('=') ? '' : usernameCell);
+
+        final password = cellAt(2);
+        final displayName = cellAt(3);
+        final employeeId = cellAt(4);
+        final role = cellAt(5).isEmpty ? 'employee' : cellAt(5);
+        final department = cellAt(6);
+        final position = cellAt(7);
+        final batch = cellAt(8);
+        final joinDate = cellAt(9);
+        final bankName = cellAt(10);
+        final accountNumber = cellAt(11);
+        final accountHolderName = cellAt(12);
+
+        // Skip blank template rows (the username column holds a preview
+        // formula down to row 500, so "empty" rows are not really empty).
+        final hasAnyData = email.isNotEmpty ||
+            password.isNotEmpty ||
+            displayName.isNotEmpty ||
+            employeeId.isNotEmpty ||
+            (usernameCell.isNotEmpty && !usernameCell.startsWith('='));
+        if (!hasAnyData) continue;
 
         if (username.isEmpty || password.isEmpty) {
           failed++;
@@ -173,36 +432,75 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         }
 
         setState(() {
-          _importStatus = 'Creating ${i}/${sheet.rows.length - 1}: $username';
+          _importStatus = 'Creating: $username';
         });
 
         try {
-          final email = '$username@staffconnect.app';
-          final cred = await secondaryAuth.createUserWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-          final uid = cred.user!.uid;
+          final loginEmail = '$username@staffconnect.app';
+          String uid;
+          bool repaired = false;
 
-          await FirebaseFirestore.instance.collection('users').doc(uid).set({
+          try {
+            final cred = await secondaryAuth.createUserWithEmailAndPassword(
+              email: loginEmail,
+              password: password,
+            );
+            uid = cred.user!.uid;
+          } on FirebaseAuthException catch (e) {
+            if (e.code != 'email-already-in-use') rethrow;
+            // The login account already exists (usually because an earlier
+            // import created it but failed before writing the profile).
+            // Sign in to recover the uid and rewrite the profile.
+            final cred = await secondaryAuth.signInWithEmailAndPassword(
+              email: loginEmail,
+              password: password,
+            );
+            uid = cred.user!.uid;
+            repaired = true;
+          }
+
+          final userData = <String, dynamic>{
             'username': username,
+            'email': email,
             'displayName': displayName,
             'employeeId': employeeId,
             'role': role,
-            'department': department,
-            'batch': batch,
-            'joinDate': joinDate,
+            'department': role == 'admin' ? 'Admin' : department,
             'createdAt': FieldValue.serverTimestamp(),
-          });
+          };
+
+          if (role != 'admin') {
+            userData['batch'] = int.tryParse(batch) ?? 0;
+            final parsedJoinDate = _parseDate(joinDate);
+            if (parsedJoinDate != null) {
+              userData['joinDate'] = Timestamp.fromDate(parsedJoinDate);
+            }
+            if (department == 'Management' && position.isNotEmpty) {
+              userData['position'] = position;
+            }
+            userData['bankName'] = bankName;
+            userData['accountNumber'] = accountNumber;
+            userData['accountHolderName'] = accountHolderName;
+          }
+
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .set(userData);
 
           await secondaryAuth.signOut();
           success++;
+          if (repaired) {
+            errors.add('Row ${i + 1}: $username login existed - profile fixed');
+          }
         } on FirebaseAuthException catch (e) {
           failed++;
-          if (e.code == 'email-already-in-use') {
-            errors.add('Row ${i + 1}: $username already exists');
-          } else if (e.code == 'weak-password') {
-            errors.add('Row ${i + 1}: $username — password too weak');
+          if (e.code == 'weak-password') {
+            errors.add('Row ${i + 1}: $username - password too weak');
+          } else if (e.code == 'wrong-password' ||
+              e.code == 'invalid-credential') {
+            errors.add(
+                'Row ${i + 1}: $username exists with a different password');
           } else {
             errors.add('Row ${i + 1}: ${e.code}');
           }
@@ -262,7 +560,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               ],
               if (errors.isNotEmpty) ...[
                 const Divider(),
-                const Text('Errors:',
+                const Text('Details:',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 ...errors.take(10).map((e) => Padding(
@@ -287,6 +585,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _listController.dispose();
     super.dispose();
   }
 
@@ -308,19 +607,56 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
             ),
           ),
         ),
-        title: const Text('Manage Users'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.file_download_outlined),
-            tooltip: 'Download Excel Template',
-            onPressed: _isImporting ? null : _downloadTemplate,
-          ),
-          IconButton(
-            icon: const Icon(Icons.file_upload_outlined),
-            tooltip: 'Bulk Import from Excel',
-            onPressed: _isImporting ? null : _importUsers,
-          ),
-        ],
+        leading: _selectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Cancel selection',
+                onPressed: _isDeleting ? null : _exitSelection,
+              )
+            : null,
+        title: Text(
+          _selectionMode ? '${_selectedIds.length} selected' : 'Manage Users',
+        ),
+        actions: _selectionMode
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.select_all),
+                  tooltip: 'Select all',
+                  onPressed: _isDeleting
+                      ? null
+                      : () => setState(() {
+                            _selectedIds
+                              ..clear()
+                              ..addAll(_selectableVisibleIds);
+                          }),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete selected',
+                  onPressed: (_selectedIds.isEmpty || _isDeleting)
+                      ? null
+                      : _deleteSelected,
+                ),
+              ]
+            : [
+                IconButton(
+                  icon: const Icon(Icons.checklist_outlined),
+                  tooltip: 'Select users',
+                  onPressed: _isImporting
+                      ? null
+                      : () => setState(() => _selectionMode = true),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.file_download_outlined),
+                  tooltip: 'Download Excel Template',
+                  onPressed: _isImporting ? null : _downloadTemplate,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.file_upload_outlined),
+                  tooltip: 'Bulk Import from Excel',
+                  onPressed: _isImporting ? null : _importUsers,
+                ),
+              ],
       ),
       body: Column(
         children: [
@@ -409,9 +745,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('users')
-                  .snapshots(),
+              stream: _usersStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -462,7 +796,17 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                       'No matches', 'Try a different search or filter');
                 }
 
+                _selectableVisibleIds = docs
+                    .where((d) =>
+                        ((d.data() as Map<String, dynamic>)['username'] ?? '')
+                            .toString() !=
+                        _myUsername)
+                    .map((d) => d.id)
+                    .toList();
+
                 return ListView.builder(
+                  key: const PageStorageKey('usersList'),
+                  controller: _listController,
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
@@ -476,7 +820,9 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton.extended(
         backgroundColor: const Color(0xFF3730A3),
         foregroundColor: Colors.white,
         elevation: 4,
@@ -498,6 +844,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
   Widget _userCard(String docId, Map<String, dynamic> data) {
     final isAdmin = data['role'] == 'admin';
     final displayName = data['displayName'] ?? '-';
+    final isSelf = (data['username'] ?? '').toString() == _myUsername;
+    final isSelected = _selectedIds.contains(docId);
     final initial = displayName.toString().isNotEmpty
         ? displayName.toString().substring(0, 1).toUpperCase()
         : '?';
@@ -505,15 +853,47 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isSelected ? AppTheme.primarySurface : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border, width: 0.5),
+        border: Border.all(
+          color: isSelected ? AppTheme.primary : AppTheme.border,
+          width: isSelected ? 1.2 : 0.5,
+        ),
         boxShadow: AppTheme.cardShadow,
       ),
-      child: Padding(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onLongPress: isSelf
+              ? null
+              : () {
+                  setState(() {
+                    _selectionMode = true;
+                    _selectedIds.add(docId);
+                  });
+                },
+          onTap: (_selectionMode && !isSelf && !_isDeleting)
+              ? () => _toggleSelect(docId)
+              : null,
+          child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
           children: [
+            if (_selectionMode)
+              SizedBox(
+                width: 34,
+                child: isSelf
+                    ? const Icon(Icons.lock_outline,
+                        size: 18, color: AppTheme.textTertiary)
+                    : Checkbox(
+                        value: isSelected,
+                        activeColor: AppTheme.primary,
+                        onChanged: _isDeleting
+                            ? null
+                            : (_) => _toggleSelect(docId),
+                      ),
+              ),
             Container(
               width: 44,
               height: 44,
@@ -607,6 +987,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               ),
             ),
             PopupMenuButton<String>(
+              enabled: !_selectionMode,
               icon: const Icon(Icons.more_vert,
                   color: AppTheme.textSecondary),
               shape: RoundedRectangleBorder(
@@ -663,6 +1044,8 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               ],
             ),
           ],
+        ),
+      ),
         ),
       ),
     );

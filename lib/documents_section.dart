@@ -34,6 +34,8 @@ class _DocumentsSectionState extends State<DocumentsSection> {
 
   String? _uploadingKey;
 
+  late final Stream<DocumentSnapshot> _userStream;
+
   @override
   void initState() {
     super.initState();
@@ -41,6 +43,10 @@ class _DocumentsSectionState extends State<DocumentsSection> {
       CloudinaryConfig.cloudName,
       CloudinaryConfig.uploadPreset,
     );
+    _userStream = FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.userId)
+        .snapshots();
   }
 
   Future<void> _uploadDocument(String docKey, String fieldPath) async {
@@ -184,10 +190,7 @@ class _DocumentsSectionState extends State<DocumentsSection> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userId)
-          .snapshots(),
+      stream: _userStream,
       builder: (context, snapshot) {
         Map<String, dynamic> documents = {};
         if (snapshot.hasData && snapshot.data!.exists) {

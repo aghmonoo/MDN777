@@ -6,6 +6,8 @@ import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'cloudinary_config.dart';
 import 'theme.dart';
+import 'admin/recycle_bin.dart';
+import 'nav_badges.dart';
 
 class GroupChatPage extends StatefulWidget {
   const GroupChatPage({super.key});
@@ -19,7 +21,11 @@ class _GroupChatPageState extends State<GroupChatPage> {
   final _scrollController = ScrollController();
   String _displayName = '';
   String _username = '';
-  int _totalStaffCount = 0;
+  bool _isAdmin = false;
+  bool _isClearing = false;
+
+  static const int _messageWindow = 100;
+  DateTime? _lastGroupReadTouch;
   bool _isUploading = false;
   String _uploadStatus = '';
 
@@ -28,6 +34,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
   String? _replyToId;
 
   late final CloudinaryPublic _cloudinary;
+  late final Stream<QuerySnapshot> _messagesStream;
 
   @override
   void initState() {
@@ -36,6 +43,15 @@ class _GroupChatPageState extends State<GroupChatPage> {
       CloudinaryConfig.cloudName,
       CloudinaryConfig.uploadPreset,
     );
+    // Only the most recent messages are streamed. Older history stays in
+    // Firestore but is not read on every app start.
+    _messagesStream = FirebaseFirestore.instance
+        .collection('groups')
+        .doc('general')
+        .collection('messages')
+        .orderBy('sentAt', descending: false)
+        .limitToLast(_messageWindow)
+        .snapshots();
     _loadUserInfo();
   }
 
@@ -54,16 +70,12 @@ class _GroupChatPageState extends State<GroupChatPage> {
       setState(() {
         _username = username;
         final role = data['role'] ?? 'employee';
+        _isAdmin = role == 'admin';
         final baseName = data['displayName'] ?? username;
         _displayName = role == 'admin' ? '${baseName}_admin' : baseName;
       });
     }
 
-    final allUsersSnapshot =
-        await FirebaseFirestore.instance.collection('users').get();
-    setState(() {
-      _totalStaffCount = allUsersSnapshot.docs.length;
-    });
   }
 
   Future<void> _sendMessage({
@@ -338,6 +350,165 @@ class _GroupChatPageState extends State<GroupChatPage> {
     return diff.inMinutes < 15;
   }
 
+  String _msgLabel(Map<String, dynamic> d) {
+    final t = (d['text'] ?? '').toString();
+    if (t.isNotEmpty) return t;
+    if (d['imageUrl'] != null) return 'Photo';
+    if (d['fileUrl'] != null) return (d['fileName'] ?? 'File').toString();
+    return 'Message';
+  }
+
+  Future<void> _clearAllMessages() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Clear all messages'),
+        content: const Text(
+          'ALL messages in the group chat will be removed for everyone and '
+          'moved to the Recycle Bin.\n\n'
+          'They can be restored within 30 days.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear all'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _isClearing = true);
+
+    int deleted = 0;
+    try {
+      final db = FirebaseFirestore.instance;
+      final messages =
+          db.collection('groups').doc('general').collection('messages');
+
+      final groupId = RecycleBin.newRef().id;
+
+      while (true) {
+        final snap = await messages.limit(200).get();
+        if (snap.docs.isEmpty) break;
+        final writeBatch = db.batch();
+        for (final d in snap.docs) {
+          final data = d.data();
+          writeBatch.set(
+            RecycleBin.newRef(),
+            RecycleBin.entry(
+              type: 'message',
+              originalPath: 'groups/general/messages/${d.id}',
+              data: data,
+              label: _msgLabel(data),
+              sublabel: 'Group Chat - ${data['senderName'] ?? '-'}',
+              groupId: groupId,
+              groupLabel: 'Group Chat - cleared by admin',
+            ),
+          );
+          writeBatch.delete(d.reference);
+        }
+        await writeBatch.commit();
+        deleted += snap.docs.length;
+        if (snap.docs.length < 200) break;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$deleted message(s) moved to Recycle Bin'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+
+    if (mounted) setState(() => _isClearing = false);
+  }
+
+  Future<void> _confirmDeleteMessage(String messageId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete message'),
+        content: const Text(
+          'This message will be permanently deleted for everyone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final ref = db
+          .collection('groups')
+          .doc('general')
+          .collection('messages')
+          .doc(messageId);
+      final snap = await ref.get();
+      final data = snap.data() ?? <String, dynamic>{};
+
+      final writeBatch = db.batch();
+      writeBatch.set(
+        RecycleBin.newRef(),
+        RecycleBin.entry(
+          type: 'message',
+          originalPath: 'groups/general/messages/$messageId',
+          data: data,
+          label: _msgLabel(data),
+          sublabel: 'Group Chat - ${data['senderName'] ?? '-'}',
+        ),
+      );
+      writeBatch.delete(ref);
+      await writeBatch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message moved to Recycle Bin'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _showMessageOptions(
       String messageId, Map<String, dynamic> data, bool isMe) {
     final canEdit = _canEdit(data);
@@ -402,6 +573,34 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _showEditDialog(messageId, data['text'] ?? '');
+                },
+              ),
+            if (_isAdmin)
+              ListTile(
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.delete_outline,
+                      color: Color(0xFFDC2626), size: 18),
+                ),
+                title: const Text(
+                  'Delete message',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFFDC2626),
+                  ),
+                ),
+                subtitle: const Text(
+                  'Admin only - permanent',
+                  style: TextStyle(fontSize: 11),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmDeleteMessage(messageId);
                 },
               ),
             const SizedBox(height: 12),
@@ -536,6 +735,94 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
   }
 
+  /// Records "the group is read up to now" on the user profile so the
+  /// navigation badge does not have to scan the whole message history.
+  void _touchGroupRead() {
+    final now = DateTime.now();
+    if (_lastGroupReadTouch != null &&
+        now.difference(_lastGroupReadTouch!).inSeconds < 10) {
+      return;
+    }
+    _lastGroupReadTouch = now;
+    NavBadges.markGroupRead();
+  }
+
+  // ---- older message pagination ----
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> _olderDocs = [];
+  bool _loadingOlder = false;
+  bool _noMoreOlder = false;
+  bool _skipAutoScroll = false;
+
+  Future<void> _loadOlder(
+      QueryDocumentSnapshot<Map<String, dynamic>>? oldestShown) async {
+    if (_loadingOlder || _noMoreOlder || oldestShown == null) return;
+    setState(() {
+      _loadingOlder = true;
+      _skipAutoScroll = true;
+    });
+    try {
+      final snap = await FirebaseFirestore.instance
+              .collection('groups')
+              .doc('general')
+              .collection('messages')
+          .orderBy('sentAt', descending: true)
+          .startAfterDocument(oldestShown)
+          .limit(50)
+          .get();
+
+      if (snap.docs.isEmpty) {
+        _noMoreOlder = true;
+      } else {
+        _olderDocs.insertAll(0, snap.docs.reversed);
+        if (snap.docs.length < 50) _noMoreOlder = true;
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _loadingOlder = false;
+        _skipAutoScroll = true;
+      });
+    }
+  }
+
+  Widget _loadOlderButton(
+      QueryDocumentSnapshot<Map<String, dynamic>>? oldestShown) {
+    if (_noMoreOlder) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 12),
+        child: Center(
+          child: Text(
+            'Beginning of conversation',
+            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Center(
+        child: _loadingOlder
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : TextButton.icon(
+                onPressed: () => _loadOlder(oldestShown),
+                icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                label: const Text('Load earlier messages',
+                    style: TextStyle(fontSize: 12)),
+              ),
+      ),
+    );
+  }
+
   Future<void> _markAsRead(String messageId, List<dynamic> readBy) async {
     if (_username.isEmpty) return;
     if (readBy.contains(_username)) return;
@@ -575,10 +862,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
   String _formatReadStatus(List<dynamic> readBy) {
     final readers = readBy.where((u) => u != _username).length;
-    final possibleReaders = _totalStaffCount - 1;
-    if (possibleReaders <= 0) return '';
     if (readers == 0) return 'Sent';
-    if (readers >= possibleReaders) return 'All read';
+    if (readers == 1) return '1 Read';
     return '$readers Read';
   }
 
@@ -621,17 +906,52 @@ class _GroupChatPageState extends State<GroupChatPage> {
             ),
           ],
         ),
+        actions: [
+          if (_isAdmin)
+            _isClearing
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 18),
+                    child: Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  )
+                : PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert, color: Colors.white),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    onSelected: (v) {
+                      if (v == 'clear') _clearAllMessages();
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'clear',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_sweep_outlined,
+                                size: 18, color: Colors.red),
+                            SizedBox(width: 10),
+                            Text('Clear all messages',
+                                style: TextStyle(color: Colors.red)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+        ],
       ),
       body: Column(
         children: [
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('groups')
-                  .doc('general')
-                  .collection('messages')
-                  .orderBy('sentAt', descending: false)
-                  .snapshots(),
+              stream: _messagesStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -647,6 +967,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
                 final docs = snapshot.data!.docs;
 
+                _touchGroupRead();
+
                 for (final doc in docs) {
                   final data = doc.data() as Map<String, dynamic>;
                   final readBy = (data['readBy'] as List<dynamic>?) ?? [];
@@ -656,21 +978,32 @@ class _GroupChatPageState extends State<GroupChatPage> {
                   }
                 }
 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_scrollController.hasClients) {
-                    _scrollController.jumpTo(
-                      _scrollController.position.maxScrollExtent,
-                    );
-                  }
-                });
+                if (_skipAutoScroll) {
+                  _skipAutoScroll = false;
+                } else {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_scrollController.hasClients) {
+                      _scrollController.jumpTo(
+                        _scrollController.position.maxScrollExtent,
+                      );
+                    }
+                  });
+                }
+
+                final liveDocs = docs
+                    .cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+                final allDocs = [..._olderDocs, ...liveDocs];
+                final oldestShown =
+                    allDocs.isEmpty ? null : allDocs.first;
 
                 return ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.all(14),
-                  itemCount: docs.length,
+                  itemCount: allDocs.length + 1,
                   itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
+                    if (index == 0) return _loadOlderButton(oldestShown);
+                    final doc = allDocs[index - 1];
+                    final data = doc.data();
                     final isMe = data['senderId'] == _username;
                     return _buildMessageBubble(doc.id, data, isMe);
                   },

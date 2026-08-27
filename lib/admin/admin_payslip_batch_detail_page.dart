@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'dart:typed_data';
-import 'dart:html' as html;
+import '../file_download_helper.dart';
 import '../theme.dart';
 
 class AdminPayslipBatchDetailPage extends StatefulWidget {
@@ -18,6 +18,17 @@ class AdminPayslipBatchDetailPage extends StatefulWidget {
 class _AdminPayslipBatchDetailPageState
     extends State<AdminPayslipBatchDetailPage> {
   bool _isDownloading = false;
+
+  late final Stream<QuerySnapshot> _payslipsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _payslipsStream = FirebaseFirestore.instance
+        .collection('payslips')
+        .where('batchId', isEqualTo: widget.batchId)
+        .snapshots();
+  }
 
   String _formatNumber(double value) {
     return value.toStringAsFixed(0).replaceAllMapped(
@@ -36,14 +47,7 @@ class _AdminPayslipBatchDetailPageState
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
-  void _downloadFile(Uint8List bytes, String filename) {
-    final blob = html.Blob([bytes]);
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute('download', filename)
-      ..click();
-    html.Url.revokeObjectUrl(url);
-  }
+  
 
   Future<void> _downloadBatchExcel(String batchMonth) async {
     setState(() => _isDownloading = true);
@@ -80,6 +84,8 @@ class _AdminPayslipBatchDetailPageState
         'basicSalary',
         'allowance',
         'kpiBonus',
+        'otHours',
+        'otAmount',
         'socialSecurity',
         'leaveDeduction',
         'lateMinutes',
@@ -126,21 +132,25 @@ class _AdminPayslipBatchDetailPageState
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 10, rowIndex: rowIndex))
             .value = DoubleCellValue((data['kpiBonus'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 11, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['socialSecurity'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['otHours'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 12, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['leaveDeduction'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['otAmount'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 13, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['lateMinutes'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['socialSecurity'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 14, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['lateAmount'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['leaveDeduction'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['lateMinutes'] ?? 0).toDouble());
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 16, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['lateAmount'] ?? 0).toDouble());
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 17, rowIndex: rowIndex))
             .value = DoubleCellValue((data['netSalary'] ?? 0).toDouble());
       }
 
       final bytes = excel.save();
       if (bytes == null) throw Exception('Failed to generate Excel');
 
-      _downloadFile(
+      downloadFile(
         Uint8List.fromList(bytes),
         'payslips_${batchMonth.replaceAll(' ', '_')}.xlsx',
       );
@@ -658,10 +668,7 @@ class _AdminPayslipBatchDetailPageState
 
   Widget _buildEmployeesList() {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('payslips')
-          .where('batchId', isEqualTo: widget.batchId)
-          .snapshots(),
+      stream: _payslipsStream,
       builder: (context, payslipSnapshot) {
         if (payslipSnapshot.connectionState == ConnectionState.waiting) {
           return const Padding(

@@ -1,11 +1,11 @@
 {
-    "name": "mdn777",
-    "short_name": "mdn777",
+    "name": "Staff Connect",
+    "short_name": "Staff Connect",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F8FAFC",
+    "theme_color": "#0284C7",
+    "description": "HR portal for payslips, announcements and staff chat.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

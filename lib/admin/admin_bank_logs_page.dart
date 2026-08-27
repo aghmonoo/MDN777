@@ -1,9 +1,137 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme.dart';
+import 'recycle_bin.dart';
 
-class AdminBankLogsPage extends StatelessWidget {
+class AdminBankLogsPage extends StatefulWidget {
   const AdminBankLogsPage({super.key});
+
+  @override
+  State<AdminBankLogsPage> createState() => _AdminBankLogsPageState();
+}
+
+class _AdminBankLogsPageState extends State<AdminBankLogsPage> {
+  late final Stream<QuerySnapshot> _logsStream;
+  final ScrollController _listController = ScrollController();
+
+  bool _selectionMode = false;
+  bool _isDeleting = false;
+  final Set<String> _selectedIds = {};
+  List<String> _visibleIds = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _logsStream = FirebaseFirestore.instance
+        .collection('bank_change_logs')
+        .orderBy('changedAt', descending: true)
+        .snapshots();
+  }
+
+  @override
+  void dispose() {
+    _listController.dispose();
+    super.dispose();
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelect(String docId) {
+    setState(() {
+      if (_selectedIds.contains(docId)) {
+        _selectedIds.remove(docId);
+      } else {
+        _selectedIds.add(docId);
+      }
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Delete ${ids.length} log(s)'),
+        content: const Text(
+          'Selected bank change logs are moved to the Recycle Bin and can be '
+          'restored within 30 days.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _isDeleting = true);
+
+    int deleted = 0;
+    try {
+      final db = FirebaseFirestore.instance;
+      for (var i = 0; i < ids.length; i += 200) {
+        final end = (i + 200 > ids.length) ? ids.length : i + 200;
+        final writeBatch = db.batch();
+        for (final id in ids.sublist(i, end)) {
+          final ref = db.collection('bank_change_logs').doc(id);
+          final snap = await ref.get();
+          if (!snap.exists) continue;
+          final data = snap.data() ?? <String, dynamic>{};
+          writeBatch.set(
+            RecycleBin.newRef(),
+            RecycleBin.entry(
+              type: 'banklog',
+              originalPath: 'bank_change_logs/$id',
+              data: data,
+              label: (data['displayName'] ?? '-').toString(),
+              sublabel: 'Bank change - @${data['username'] ?? '-'}',
+            ),
+          );
+          writeBatch.delete(ref);
+          deleted++;
+        }
+        await writeBatch.commit();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isDeleting = false;
+        _selectionMode = false;
+        _selectedIds.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$deleted log(s) moved to Recycle Bin'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
 
   String _formatDate(Timestamp? timestamp) {
     if (timestamp == null) return '';
@@ -323,20 +451,54 @@ class AdminBankLogsPage extends StatelessWidget {
             ),
           ),
         ),
-        title: const Text('Bank Change Logs'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.done_all),
-            tooltip: 'Mark all as read',
-            onPressed: () => _markAllAsRead(context),
-          ),
-        ],
+        leading: _selectionMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'Cancel selection',
+                onPressed: _isDeleting ? null : _exitSelection,
+              )
+            : null,
+        title: Text(
+          _selectionMode
+              ? '${_selectedIds.length} selected'
+              : 'Bank Change Logs',
+        ),
+        actions: _selectionMode
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.select_all),
+                  tooltip: 'Select all',
+                  onPressed: _isDeleting
+                      ? null
+                      : () => setState(() {
+                            _selectedIds
+                              ..clear()
+                              ..addAll(_visibleIds);
+                          }),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: 'Delete selected',
+                  onPressed: (_selectedIds.isEmpty || _isDeleting)
+                      ? null
+                      : _deleteSelected,
+                ),
+              ]
+            : [
+                IconButton(
+                  icon: const Icon(Icons.checklist_outlined),
+                  tooltip: 'Select logs',
+                  onPressed: () => setState(() => _selectionMode = true),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.done_all),
+                  tooltip: 'Mark all as read',
+                  onPressed: () => _markAllAsRead(context),
+                ),
+              ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('bank_change_logs')
-            .orderBy('changedAt', descending: true)
-            .snapshots(),
+        stream: _logsStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -365,7 +527,11 @@ class AdminBankLogsPage extends StatelessWidget {
           final unreadCount =
               allDocs.where((d) => (d.data() as Map)['isRead'] != true).length;
 
+          _visibleIds = allDocs.map((d) => d.id).toList();
+
           return ListView.builder(
+            key: const PageStorageKey('bankLogs'),
+            controller: _listController,
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             itemCount: allDocs.length + 1,
             itemBuilder: (context, index) {
@@ -512,6 +678,7 @@ class AdminBankLogsPage extends StatelessWidget {
   Widget _logCard(
       BuildContext context, String docId, Map<String, dynamic> data) {
     final isRead = data['isRead'] == true;
+    final isSelected = _selectedIds.contains(docId);
     final newData = (data['newData'] as Map<String, dynamic>?) ?? {};
     final displayName = data['displayName'] ?? '-';
     final initial = displayName.toString().isNotEmpty
@@ -528,11 +695,15 @@ class AdminBankLogsPage extends StatelessWidget {
                 end: Alignment.bottomRight,
                 colors: [Colors.white, AppTheme.primarySurface],
               ),
-        color: isRead ? Colors.white : null,
+        color: isSelected
+            ? AppTheme.primarySurface
+            : (isRead ? Colors.white : null),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isRead ? AppTheme.border : AppTheme.primarySoft,
-          width: isRead ? 0.5 : 0.8,
+          color: isSelected
+              ? AppTheme.primary
+              : (isRead ? AppTheme.border : AppTheme.primarySoft),
+          width: isSelected ? 1.2 : (isRead ? 0.5 : 0.8),
         ),
         boxShadow: AppTheme.cardShadow,
       ),
@@ -540,12 +711,34 @@ class AdminBankLogsPage extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: () => _showDetailDialog(context, data, docId),
+          onLongPress: _isDeleting
+              ? null
+              : () {
+                  setState(() {
+                    _selectionMode = true;
+                    _selectedIds.add(docId);
+                  });
+                },
+          onTap: _isDeleting
+              ? null
+              : (_selectionMode
+                  ? () => _toggleSelect(docId)
+                  : () => _showDetailDialog(context, data, docId)),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_selectionMode)
+                  SizedBox(
+                    width: 34,
+                    child: Checkbox(
+                      value: isSelected,
+                      activeColor: AppTheme.primary,
+                      onChanged:
+                          _isDeleting ? null : (_) => _toggleSelect(docId),
+                    ),
+                  ),
                 Stack(
                   clipBehavior: Clip.none,
                   children: [

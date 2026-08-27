@@ -4,9 +4,39 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme.dart';
 import '../group_chat_page.dart';
 import '../private_chat_page.dart';
+import 'recycle_bin.dart';
 
-class AdminChatPage extends StatelessWidget {
+class AdminChatPage extends StatefulWidget {
   const AdminChatPage({super.key});
+
+  @override
+  State<AdminChatPage> createState() => _AdminChatPageState();
+}
+
+class _AdminChatPageState extends State<AdminChatPage> {
+  late final String _adminUsername;
+  late final Stream<QuerySnapshot> _groupMessagesStream;
+  late final Stream<QuerySnapshot> _myChatsStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _adminUsername =
+        FirebaseAuth.instance.currentUser?.email?.split('@').first ?? '';
+    final db = FirebaseFirestore.instance;
+    _groupMessagesStream = db
+        .collection('groups')
+        .doc('general')
+        .collection('messages')
+        .orderBy('sentAt', descending: true)
+        .limit(50)
+        .snapshots();
+    _myChatsStream = db
+        .collection('chats')
+        .where('participants', arrayContains: _adminUsername)
+        .orderBy('lastMessageAt', descending: true)
+        .snapshots();
+  }
 
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return '';
@@ -38,8 +68,7 @@ class AdminChatPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final adminUsername = user?.email?.split('@').first ?? '';
+    final adminUsername = _adminUsername;
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -100,13 +129,7 @@ class AdminChatPage extends StatelessWidget {
 
   Widget _buildGroupChatCard(BuildContext context, String adminUsername) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('groups')
-          .doc('general')
-          .collection('messages')
-          .orderBy('sentAt', descending: true)
-          .limit(50)
-          .snapshots(),
+      stream: _groupMessagesStream,
       builder: (context, snapshot) {
         String lastMessage = 'All staff conversation';
         String lastSender = '';
@@ -289,11 +312,7 @@ class AdminChatPage extends StatelessWidget {
 
   Widget _buildPrivateChatsList(BuildContext context, String adminUsername) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('chats')
-          .where('participants', arrayContains: adminUsername)
-          .orderBy('lastMessageAt', descending: true)
-          .snapshots(),
+      stream: _myChatsStream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Padding(
@@ -388,11 +407,19 @@ class _PrivateChatTile extends StatefulWidget {
 
 class _PrivateChatTileState extends State<_PrivateChatTile> {
   String _displayName = '';
+  bool _isDeleting = false;
+  late final Stream<QuerySnapshot> _unreadStream;
 
   @override
   void initState() {
     super.initState();
     _displayName = widget.otherUsername;
+    _unreadStream = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(widget.chatId)
+        .collection('messages')
+        .where('isRead', isEqualTo: false)
+        .snapshots();
     _loadDisplayName();
   }
 
@@ -413,6 +440,108 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
       }
     } catch (_) {}
   }
+
+  Future<void> _confirmDeleteChat() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete chat'),
+        content: Text(
+          'Delete the whole conversation with $_displayName?\n\n'
+          'It is moved to the Recycle Bin and can be restored within 30 days.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    setState(() => _isDeleting = true);
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final messages =
+          db.collection('chats').doc(widget.chatId).collection('messages');
+      final groupId = RecycleBin.newRef().id;
+      final groupLabel = 'Chat with $_displayName';
+      int msgCount = 0;
+
+      while (true) {
+        final snap = await messages.limit(200).get();
+        if (snap.docs.isEmpty) break;
+        final writeBatch = db.batch();
+        for (final d in snap.docs) {
+          final data = d.data();
+          final text = (data['text'] ?? '').toString();
+          writeBatch.set(
+            RecycleBin.newRef(),
+            RecycleBin.entry(
+              type: 'message',
+              originalPath: 'chats/${widget.chatId}/messages/${d.id}',
+              data: data,
+              label: text.isNotEmpty ? text : 'Attachment',
+              sublabel: groupLabel,
+              groupId: groupId,
+              groupLabel: groupLabel,
+            ),
+          );
+          writeBatch.delete(d.reference);
+        }
+        await writeBatch.commit();
+        msgCount += snap.docs.length;
+        if (snap.docs.length < 200) break;
+      }
+
+      final chatRef = db.collection('chats').doc(widget.chatId);
+      final chatSnap = await chatRef.get();
+      final finalBatch = db.batch();
+      finalBatch.set(
+        RecycleBin.newRef(),
+        RecycleBin.entry(
+          type: 'chat',
+          originalPath: 'chats/${widget.chatId}',
+          data: chatSnap.data() ?? <String, dynamic>{},
+          label: groupLabel,
+          sublabel: '$msgCount message(s)',
+          groupId: groupId,
+          groupLabel: '$groupLabel ($msgCount messages)',
+        ),
+      );
+      finalBatch.delete(chatRef);
+      await finalBatch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Chat moved to Recycle Bin'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+
+    if (mounted) setState(() => _isDeleting = false);
+  }
+
 
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return '';
@@ -438,12 +567,7 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('chats')
-          .doc(widget.chatId)
-          .collection('messages')
-          .where('isRead', isEqualTo: false)
-          .snapshots(),
+      stream: _unreadStream,
       builder: (context, unreadSnap) {
         int unreadCount = 0;
         if (unreadSnap.hasData) {
@@ -486,16 +610,19 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(16),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PrivateChatPage(
-                    chatId: widget.chatId,
-                    otherUsername: widget.otherUsername,
-                    otherDisplayName: _displayName,
-                  ),
-                ),
-              ),
+              onLongPress: _isDeleting ? null : _confirmDeleteChat,
+              onTap: _isDeleting
+                  ? null
+                  : () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PrivateChatPage(
+                            chatId: widget.chatId,
+                            otherUsername: widget.otherUsername,
+                            otherDisplayName: _displayName,
+                          ),
+                        ),
+                      ),
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Row(
@@ -592,6 +719,27 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
                           const SizedBox(height: 18),
                       ],
                     ),
+                    SizedBox(
+                      width: 34,
+                      child: _isDeleting
+                          ? const Padding(
+                              padding: EdgeInsets.all(8),
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            )
+                          : IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              icon: const Icon(Icons.delete_outline,
+                                  size: 18, color: Color(0xFFDC2626)),
+                              tooltip: 'Delete chat',
+                              onPressed: _confirmDeleteChat,
+                            ),
+                    ),
                   ],
                 ),
               ),
@@ -614,6 +762,14 @@ class _NewChatDialog extends StatefulWidget {
 
 class _NewChatDialogState extends State<_NewChatDialog> {
   String _searchQuery = '';
+
+  late final Stream<QuerySnapshot> _usersStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _usersStream = FirebaseFirestore.instance.collection('users').snapshots();
+  }
 
   void _startChat(
       BuildContext context, String otherUsername, String otherDisplayName) {
@@ -703,9 +859,7 @@ class _NewChatDialogState extends State<_NewChatDialog> {
             const SizedBox(height: 14),
             Flexible(
               child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .snapshots(),
+                stream: _usersStream,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());

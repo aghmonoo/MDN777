@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
-import 'dart:html' as html;
+import '../file_download_helper.dart';
 import '../theme.dart';
 import 'admin_payslip_batch_detail_page.dart';
 
@@ -19,6 +19,17 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
   bool _isExporting = false;
   bool _isImporting = false;
   String _statusMessage = '';
+
+  late final Stream<QuerySnapshot> _batchesStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _batchesStream = FirebaseFirestore.instance
+        .collection('payslip_batches')
+        .orderBy('importedAt', descending: true)
+        .snapshots();
+  }
 
   String _getCurrentMonth() {
     final now = DateTime.now();
@@ -72,6 +83,8 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         'basicSalary',
         'allowance',
         'kpiBonus',
+        'otHours',
+        'otAmount',
         'socialSecurity',
         'leaveDeduction',
         'lateMinutes',
@@ -114,15 +127,15 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: rowIndex))
             .value = TextCellValue(currentMonth);
 
-        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 17, rowIndex: rowIndex))
             .value = FormulaCellValue(
-                'I$excelRowNum+J$excelRowNum+K$excelRowNum-L$excelRowNum-M$excelRowNum-O$excelRowNum');
+                'I$excelRowNum+J$excelRowNum+K$excelRowNum+M$excelRowNum-N$excelRowNum-O$excelRowNum-Q$excelRowNum');
       }
 
       final bytes = excel.save();
       if (bytes == null) throw Exception('Failed to generate Excel');
 
-      _downloadFile(
+      downloadFile(
         Uint8List.fromList(bytes),
         'payslips_${currentMonth.replaceAll(' ', '_')}.xlsx',
       );
@@ -151,14 +164,7 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
     }
   }
 
-  void _downloadFile(Uint8List bytes, String filename) {
-    final blob = html.Blob([bytes]);
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    html.AnchorElement(href: url)
-      ..setAttribute('download', filename)
-      ..click();
-    html.Url.revokeObjectUrl(url);
-  }
+  
 
   Future<void> _importExcel() async {
     setState(() {
@@ -244,27 +250,31 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         if (row.isEmpty) continue;
 
         try {
-          final employeeId = row[0]?.value?.toString() ?? '';
-          final username = row[1]?.value?.toString() ?? '';
-          final displayName = row[2]?.value?.toString() ?? '';
-          final department = row[3]?.value?.toString() ?? '';
-          final bankName = row[4]?.value?.toString() ?? '';
-          final accountNumber = row[5]?.value?.toString() ?? '';
-          final accountHolderName = row[6]?.value?.toString() ?? '';
-          final month = row[7]?.value?.toString() ?? '';
-          final basicSalary = _parseNumber(row[8]?.value);
-          final allowance = _parseNumber(row[9]?.value);
-          final kpiBonus = _parseNumber(row[10]?.value);
-          final socialSecurity = _parseNumber(row[11]?.value);
-          final leaveDeduction = _parseNumber(row[12]?.value);
-          final lateMinutes = _parseNumber(row[13]?.value);
-          final lateAmount = _parseNumber(row[14]?.value);
+          Object? cellAt(int i) => i < row.length ? row[i]?.value : null;
+          final employeeId = cellAt(0)?.toString() ?? '';
+          final username = cellAt(1)?.toString() ?? '';
+          final displayName = cellAt(2)?.toString() ?? '';
+          final department = cellAt(3)?.toString() ?? '';
+          final bankName = cellAt(4)?.toString() ?? '';
+          final accountNumber = cellAt(5)?.toString() ?? '';
+          final accountHolderName = cellAt(6)?.toString() ?? '';
+          final month = cellAt(7)?.toString() ?? '';
+          final basicSalary = _parseNumber(cellAt(8));
+          final allowance = _parseNumber(cellAt(9));
+          final kpiBonus = _parseNumber(cellAt(10));
+          final otHours = _parseNumber(cellAt(11));
+          final otAmount = _parseNumber(cellAt(12));
+          final socialSecurity = _parseNumber(cellAt(13));
+          final leaveDeduction = _parseNumber(cellAt(14));
+          final lateMinutes = _parseNumber(cellAt(15));
+          final lateAmount = _parseNumber(cellAt(16));
 
           if (employeeId.isEmpty || username.isEmpty || month.isEmpty) continue;
 
           final netSalary = basicSalary +
               allowance +
-              kpiBonus -
+              kpiBonus +
+              otAmount -
               socialSecurity -
               leaveDeduction -
               lateAmount;
@@ -282,6 +292,8 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
             'basicSalary': basicSalary,
             'allowance': allowance,
             'kpiBonus': kpiBonus,
+            'otHours': otHours,
+            'otAmount': otAmount,
             'socialSecurity': socialSecurity,
             'leaveDeduction': leaveDeduction,
             'lateMinutes': lateMinutes,
@@ -476,10 +488,7 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
           ),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('payslip_batches')
-                  .orderBy('importedAt', descending: true)
-                  .snapshots(),
+              stream: _batchesStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

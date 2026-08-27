@@ -43,3 +43,15 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing
+android/key.properties
+*.jks
+*.keystore
+hosting/app/
+hosting/downloads/
+
+# Firebase CLI cache
+.firebase/
+firebase-debug.log
+*.firebase-debug.log

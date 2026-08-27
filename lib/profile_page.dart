@@ -447,6 +447,9 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           );
           if (confirm == true) {
+            if (context.mounted) {
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            }
             await FirebaseAuth.instance.signOut();
           }
         },

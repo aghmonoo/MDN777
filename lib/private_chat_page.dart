@@ -6,6 +6,7 @@ import 'package:cloudinary_public/cloudinary_public.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'cloudinary_config.dart';
 import 'theme.dart';
+import 'admin/recycle_bin.dart';
 
 class PrivateChatPage extends StatefulWidget {
   final String chatId;
@@ -28,6 +29,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   final _scrollController = ScrollController();
   String _displayName = '';
   String _username = '';
+  bool _isAdmin = false;
   bool _isUploading = false;
   String _uploadStatus = '';
 
@@ -35,6 +37,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
   String? _replyToId;
 
   late final CloudinaryPublic _cloudinary;
+  late final Stream<QuerySnapshot> _messagesStream;
 
   @override
   void initState() {
@@ -43,6 +46,13 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       CloudinaryConfig.cloudName,
       CloudinaryConfig.uploadPreset,
     );
+    _messagesStream = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(widget.chatId)
+        .collection('messages')
+        .orderBy('sentAt', descending: false)
+        .limitToLast(100)
+        .snapshots();
     _loadUserInfo();
     _ensureChatExists();
   }
@@ -67,6 +77,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
       if (mounted) {
         setState(() {
           _displayName = data['displayName'] ?? username;
+          _isAdmin = (data['role'] ?? 'employee') == 'admin';
         });
       }
     }
@@ -373,6 +384,83 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     return diff.inMinutes < 15;
   }
 
+  String _msgLabel(Map<String, dynamic> d) {
+    final t = (d['text'] ?? '').toString();
+    if (t.isNotEmpty) return t;
+    if (d['imageUrl'] != null) return 'Photo';
+    if (d['fileUrl'] != null) return (d['fileName'] ?? 'File').toString();
+    return 'Message';
+  }
+
+  Future<void> _confirmDeleteMessage(String messageId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Delete message'),
+        content: const Text(
+          'This message will be permanently deleted for everyone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final ref = db
+          .collection('chats')
+          .doc(widget.chatId)
+          .collection('messages')
+          .doc(messageId);
+      final snap = await ref.get();
+      final data = snap.data() ?? <String, dynamic>{};
+
+      final writeBatch = db.batch();
+      writeBatch.set(
+        RecycleBin.newRef(),
+        RecycleBin.entry(
+          type: 'message',
+          originalPath: 'chats/${widget.chatId}/messages/$messageId',
+          data: data,
+          label: _msgLabel(data),
+          sublabel: 'Chat with ${widget.otherDisplayName} - '
+              '${data['senderName'] ?? data['senderId'] ?? '-'}',
+        ),
+      );
+      writeBatch.delete(ref);
+      await writeBatch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message moved to Recycle Bin'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _showMessageOptions(
       String messageId, Map<String, dynamic> data, bool isMe) {
     final canEdit = _canEdit(data);
@@ -437,6 +525,34 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
                 onTap: () {
                   Navigator.pop(ctx);
                   _showEditDialog(messageId, data['text'] ?? '');
+                },
+              ),
+            if (_isAdmin)
+              ListTile(
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.delete_outline,
+                      color: Color(0xFFDC2626), size: 18),
+                ),
+                title: const Text(
+                  'Delete message',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFFDC2626),
+                  ),
+                ),
+                subtitle: const Text(
+                  'Admin only - permanent',
+                  style: TextStyle(fontSize: 11),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmDeleteMessage(messageId);
                 },
               ),
             const SizedBox(height: 12),
@@ -571,6 +687,82 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
     );
   }
 
+  // ---- older message pagination ----
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> _olderDocs = [];
+  bool _loadingOlder = false;
+  bool _noMoreOlder = false;
+  bool _skipAutoScroll = false;
+
+  Future<void> _loadOlder(
+      QueryDocumentSnapshot<Map<String, dynamic>>? oldestShown) async {
+    if (_loadingOlder || _noMoreOlder || oldestShown == null) return;
+    setState(() {
+      _loadingOlder = true;
+      _skipAutoScroll = true;
+    });
+    try {
+      final snap = await FirebaseFirestore.instance
+              .collection('chats')
+              .doc(widget.chatId)
+              .collection('messages')
+          .orderBy('sentAt', descending: true)
+          .startAfterDocument(oldestShown)
+          .limit(50)
+          .get();
+
+      if (snap.docs.isEmpty) {
+        _noMoreOlder = true;
+      } else {
+        _olderDocs.insertAll(0, snap.docs.reversed);
+        if (snap.docs.length < 50) _noMoreOlder = true;
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _loadingOlder = false;
+        _skipAutoScroll = true;
+      });
+    }
+  }
+
+  Widget _loadOlderButton(
+      QueryDocumentSnapshot<Map<String, dynamic>>? oldestShown) {
+    if (_noMoreOlder) {
+      return const Padding(
+        padding: EdgeInsets.only(bottom: 12),
+        child: Center(
+          child: Text(
+            'Beginning of conversation',
+            style: TextStyle(fontSize: 11, color: AppTheme.textTertiary),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Center(
+        child: _loadingOlder
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : TextButton.icon(
+                onPressed: () => _loadOlder(oldestShown),
+                icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+                label: const Text('Load earlier messages',
+                    style: TextStyle(fontSize: 12)),
+              ),
+      ),
+    );
+  }
+
   Future<void> _markAsRead(String messageId) async {
     if (_username.isEmpty) return;
     try {
@@ -652,12 +844,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
         children: [
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('chats')
-                  .doc(widget.chatId)
-                  .collection('messages')
-                  .orderBy('sentAt', descending: false)
-                  .snapshots(),
+              stream: _messagesStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -686,21 +873,32 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
                   }
                 });
 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (_scrollController.hasClients) {
-                    _scrollController.jumpTo(
-                      _scrollController.position.maxScrollExtent,
-                    );
-                  }
-                });
+                if (_skipAutoScroll) {
+                  _skipAutoScroll = false;
+                } else {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (_scrollController.hasClients) {
+                      _scrollController.jumpTo(
+                        _scrollController.position.maxScrollExtent,
+                      );
+                    }
+                  });
+                }
+
+                final liveDocs = docs
+                    .cast<QueryDocumentSnapshot<Map<String, dynamic>>>();
+                final allDocs = [..._olderDocs, ...liveDocs];
+                final oldestShown =
+                    allDocs.isEmpty ? null : allDocs.first;
 
                 return ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.all(14),
-                  itemCount: docs.length,
+                  itemCount: allDocs.length + 1,
                   itemBuilder: (context, index) {
-                    final doc = docs[index];
-                    final data = doc.data() as Map<String, dynamic>;
+                    if (index == 0) return _loadOlderButton(oldestShown);
+                    final doc = allDocs[index - 1];
+                    final data = doc.data();
                     final isMe = data['senderId'] == _username;
                     return _buildMessageBubble(doc.id, data, isMe);
                   },

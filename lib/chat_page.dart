@@ -125,7 +125,7 @@ class ChatPage extends StatelessWidget {
           .doc('general')
           .collection('messages')
           .orderBy('sentAt', descending: true)
-          .limit(50)
+          .limit(20)
           .snapshots(),
       builder: (context, snapshot) {
         String lastMessage = 'All staff conversation';
@@ -397,6 +397,19 @@ class _PrivateChatTile extends StatefulWidget {
 }
 
 class _PrivateChatTileState extends State<_PrivateChatTile> {
+  late final Stream<QuerySnapshot> _unreadStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _unreadStream = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(widget.chatId)
+        .collection('messages')
+        .where('isRead', isEqualTo: false)
+        .snapshots();
+  }
+
   String _formatTime(Timestamp? timestamp) {
     if (timestamp == null) return '';
     final dt = timestamp.toDate();
@@ -421,12 +434,7 @@ class _PrivateChatTileState extends State<_PrivateChatTile> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('chats')
-          .doc(widget.chatId)
-          .collection('messages')
-          .where('isRead', isEqualTo: false)
-          .snapshots(),
+      stream: _unreadStream,
       builder: (context, unreadSnap) {
         int unreadCount = 0;
         if (unreadSnap.hasData) {

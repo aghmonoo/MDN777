@@ -79,6 +79,9 @@ class HomeScreen extends StatelessWidget {
       ),
     );
     if (confirm == true) {
+      if (context.mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
       await FirebaseAuth.instance.signOut();
     }
   }

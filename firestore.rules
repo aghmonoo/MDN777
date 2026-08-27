@@ -1,0 +1,149 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // username == the part of the login email before '@'
+    function me() {
+      return request.auth.token.email.split('@')[0];
+    }
+
+    // Admin profiles must be stored at users/{authUid}
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function changed() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function chatExists(chatId) {
+      return exists(/databases/$(database)/documents/chats/$(chatId));
+    }
+
+    function inChat(chatId) {
+      return signedIn()
+        && chatExists(chatId)
+        && me() in get(/databases/$(database)/documents/chats/$(chatId)).data.participants;
+    }
+
+    // ---------- users ----------
+    // Employees may read only their own profile plus admin profiles
+    // (needed to start a chat). Bank details and documents of other staff
+    // are not readable.
+    match /users/{userId} {
+      allow read: if isAdmin()
+        || request.auth.uid == userId
+        || resource.data.username == me()
+        || resource.data.role == 'admin';
+
+      allow create, delete: if isAdmin();
+
+      allow update: if isAdmin()
+        || ((request.auth.uid == userId || resource.data.username == me())
+            && changed().hasOnly([
+                 'bankName',
+                 'accountNumber',
+                 'accountHolderName',
+                 'documents',
+                 'uid',
+                 'groupLastReadAt'
+               ]));
+    }
+
+    // ---------- announcements ----------
+    match /announcements/{docId} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (signedIn() && changed().hasOnly(['readBy']));
+    }
+
+    // ---------- payslips ----------
+    match /payslip_batches/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /payslips/{docId} {
+      allow read: if isAdmin() || resource.data.username == me();
+      allow write: if isAdmin();
+    }
+
+    // ---------- bank change logs ----------
+    match /bank_change_logs/{docId} {
+      allow read, update, delete: if isAdmin();
+      allow create: if signedIn() && request.resource.data.username == me();
+    }
+
+    // ---------- private chats ----------
+    match /chats/{chatId} {
+      allow read: if isAdmin()
+        || resource == null
+        || me() in resource.data.participants;
+
+      allow create: if signedIn()
+        && me() in request.resource.data.participants;
+
+      allow update: if isAdmin() || me() in resource.data.participants;
+      allow delete: if isAdmin();
+    }
+
+    match /chats/{chatId}/messages/{msgId} {
+      allow read: if isAdmin() || inChat(chatId) || !chatExists(chatId);
+
+      allow create: if inChat(chatId)
+        && request.resource.data.senderId == me();
+
+      allow update: if isAdmin()
+        || (inChat(chatId) && changed().hasOnly(['isRead']))
+        || (inChat(chatId) && resource.data.senderId == me());
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------- group chat ----------
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /groups/{groupId}/messages/{msgId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.senderId == me();
+
+      allow update: if isAdmin()
+        || (signedIn() && changed().hasOnly(['readBy']))
+        || (signedIn() && resource.data.senderId == me());
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------- app config (version gate) ----------
+    // Read before sign-in, so it must be public. Contains no user data.
+    match /app_config/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------- password reset audit ----------
+    // Written by Cloud Functions (Admin SDK bypasses rules).
+    match /password_reset_logs/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ---------- recycle bin ----------
+    match /recycle_bin/{docId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

@@ -2,77 +2,115 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rxdart/rxdart.dart';
 
+/// Unread counters for the navigation badges.
+///
+/// These streams stay open for as long as the app is running, so they are
+/// written to read as few documents as possible:
+///  * group chat  -> only messages newer than the user's `groupLastReadAt`
+///  * private chat -> only messages still flagged `isRead == false`
+///  * announcements -> only the newest [_announcementWindow] posts
 class NavBadges {
+  static const int _messageWindow = 50;
+  static const int _announcementWindow = 30;
+
   static String get _username =>
       FirebaseAuth.instance.currentUser?.email?.split('@').first ?? '';
 
-  // Chat unread — combine group + private chats (no collectionGroup)
-  static Stream<int> chatUnreadStream() {
-    final uid = _username;
-    if (uid.isEmpty) return Stream.value(0);
+  static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
-    // Group chat unread
-    final groupStream = FirebaseFirestore.instance
-        .collection('groups')
-        .doc('general')
-        .collection('messages')
+  /// Marks the group chat as read up to now.
+  static Future<void> markGroupRead() async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'groupLastReadAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {
+      // Legacy profiles are not keyed by uid; the badge simply falls back
+      // to the newest-messages window.
+    }
+  }
+
+  static Stream<int> groupUnreadStream() {
+    final me = _username;
+    final uid = _uid;
+    if (me.isEmpty || uid == null) return Stream.value(0);
+
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
         .snapshots()
-        .map((snap) {
-      int count = 0;
-      for (final doc in snap.docs) {
-        final d = doc.data();
-        if ((d['senderId'] ?? '') == uid) continue;
-        final readBy = (d['readBy'] as List?) ?? [];
-        if (!readBy.contains(uid)) count++;
-      }
-      return count;
-    });
+        .switchMap((userSnap) {
+      final lastRead = userSnap.data()?['groupLastReadAt'] as Timestamp?;
 
-    // Private chats unread
-    final privateStream = FirebaseFirestore.instance
+      Query<Map<String, dynamic>> q = FirebaseFirestore.instance
+          .collection('groups')
+          .doc('general')
+          .collection('messages')
+          .orderBy('sentAt');
+
+      if (lastRead != null) {
+        q = q.where('sentAt', isGreaterThan: lastRead);
+      }
+
+      return q.limit(_messageWindow).snapshots().map((snap) {
+        return snap.docs
+            .where((d) => (d.data()['senderId'] ?? '') != me)
+            .length;
+      });
+    });
+  }
+
+  static Stream<int> privateUnreadStream() {
+    final me = _username;
+    if (me.isEmpty) return Stream.value(0);
+
+    return FirebaseFirestore.instance
         .collection('chats')
-        .where('participants', arrayContains: uid)
+        .where('participants', arrayContains: me)
         .snapshots()
         .asyncMap((chatsSnap) async {
       int total = 0;
       for (final chatDoc in chatsSnap.docs) {
-        final msgsSnap = await chatDoc.reference
+        final msgs = await chatDoc.reference
             .collection('messages')
             .where('isRead', isEqualTo: false)
+            .limit(_messageWindow)
             .get();
-        for (final m in msgsSnap.docs) {
-          if ((m.data()['senderId'] ?? '') == uid) continue;
-          total++;
-        }
+        total += msgs.docs
+            .where((m) => (m.data()['senderId'] ?? '') != me)
+            .length;
       }
       return total;
     });
+  }
 
+  static Stream<int> chatUnreadStream() {
     return Rx.combineLatest2<int, int, int>(
-      groupStream,
-      privateStream,
+      groupUnreadStream(),
+      privateUnreadStream(),
       (a, b) => a + b,
     );
   }
 
   static Stream<int> announcementUnreadStream() {
-    final uid = _username;
-    if (uid.isEmpty) return Stream.value(0);
+    final me = _username;
+    if (me.isEmpty) return Stream.value(0);
+
     return FirebaseFirestore.instance
         .collection('announcements')
+        .orderBy('createdAt', descending: true)
+        .limit(_announcementWindow)
         .snapshots()
         .map((snap) {
       int count = 0;
       for (final doc in snap.docs) {
         final data = doc.data();
+        if ((data['title'] ?? '').toString().isEmpty) continue;
         final readBy = (data['readBy'] as List?) ?? [];
-        final unread = !readBy.contains(uid);
-        if (unread) {
-          count++;
-          print('[NavBadges] UNREAD ann: id=${doc.id} title=${data['title']} readBy=$readBy');
-        }
+        if (!readBy.contains(me)) count++;
       }
-      print('[NavBadges] Total ann unread: $count');
       return count;
     });
   }

@@ -32,6 +32,7 @@ class AnnouncementsPage extends StatelessWidget {
         stream: FirebaseFirestore.instance
             .collection('announcements')
             .orderBy('createdAt', descending: true)
+            .limit(50)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {

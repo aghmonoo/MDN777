@@ -8,6 +8,8 @@ import 'admin_bank_logs_page.dart';
 import 'admin_users_page.dart';
 import 'admin_chat_page.dart';
 import 'admin_profile_page.dart';
+import 'recycle_bin.dart';
+import '../nav_badges.dart';
 
 class AdminMainScreen extends StatefulWidget {
   const AdminMainScreen({super.key});
@@ -20,9 +22,22 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
   String _displayName = 'Admin';
   String _username = '';
 
+  late final Stream<QuerySnapshot> _usersStream;
+  late final Stream<QuerySnapshot> _announcementsStream;
+  late final Stream<QuerySnapshot> _bankLogsStream;
+  Stream<int>? _chatUnreadStream;
+
   @override
   void initState() {
     super.initState();
+    final db = FirebaseFirestore.instance;
+    _usersStream = db.collection('users').snapshots();
+    _announcementsStream =
+        db.collection('announcements').orderBy('createdAt', descending: true).limit(100).snapshots();
+    _bankLogsStream = db
+        .collection('bank_change_logs')
+        .where('isRead', isEqualTo: false)
+        .snapshots();
     _loadAdminInfo();
   }
 
@@ -73,6 +88,9 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
       ),
     );
     if (confirm == true) {
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
       await FirebaseAuth.instance.signOut();
     }
   }
@@ -364,9 +382,7 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
           children: [
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('users')
-                    .snapshots(),
+                stream: _usersStream,
                 builder: (context, snap) {
                   final count = snap.data?.docs.length ?? 0;
                   return _statTile(
@@ -383,9 +399,7 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
             const SizedBox(width: 12),
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('announcements')
-                    .snapshots(),
+                stream: _announcementsStream,
                 builder: (context, snap) {
                   final count = (snap.data?.docs ?? []).where((d) {
                     final title =
@@ -534,6 +548,19 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
             ),
           ),
           _actionTile(
+            icon: Icons.restore_from_trash_outlined,
+            label: 'Recycle Bin',
+            gradStart: const Color(0xFFE2E8F0),
+            gradEnd: const Color(0xFFCBD5E1),
+            iconColor: const Color(0xFF475569),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const AdminRecycleBinPage(),
+              ),
+            ),
+          ),
+          _actionTile(
             icon: Icons.person_outline,
             label: 'Profile',
             gradStart: AppTheme.pinkStart,
@@ -661,81 +688,30 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
       );
     }
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('chats')
-          .where('participants', arrayContains: _username)
-          .snapshots(),
-      builder: (context, chatsSnap) {
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('groups')
-              .doc('general')
-              .collection('messages')
-              .snapshots(),
-          builder: (context, groupSnap) {
-            int groupUnread = 0;
-            if (groupSnap.hasData) {
-              for (final doc in groupSnap.data!.docs) {
-                final data = doc.data() as Map<String, dynamic>;
-                final senderId = data['senderId'] ?? '';
-                final readBy = (data['readBy'] as List<dynamic>?) ?? [];
-                if (senderId != _username && !readBy.contains(_username)) {
-                  groupUnread++;
-                }
-              }
-            }
+    _chatUnreadStream ??= NavBadges.chatUnreadStream();
 
-            return FutureBuilder<int>(
-              future: _countPrivateUnread(chatsSnap.data?.docs ?? []),
-              builder: (context, privateSnap) {
-                final privateUnread = privateSnap.data ?? 0;
-                final totalUnread = groupUnread + privateUnread;
-
-                return _actionTile(
-                  icon: Icons.chat_bubble_outline,
-                  label: 'Chat',
-                  gradStart: AppTheme.primarySoft,
-                  gradEnd: AppTheme.primaryLight,
-                  iconColor: Colors.white,
-                  badge: totalUnread,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => const AdminChatPage()),
-                  ),
-                );
-              },
-            );
-          },
+    return StreamBuilder<int>(
+      stream: _chatUnreadStream,
+      builder: (context, snap) {
+        return _actionTile(
+          icon: Icons.chat_bubble_outline,
+          label: 'Chat',
+          gradStart: AppTheme.primarySoft,
+          gradEnd: AppTheme.primaryLight,
+          iconColor: Colors.white,
+          badge: snap.data ?? 0,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminChatPage()),
+          ),
         );
       },
     );
   }
 
-  Future<int> _countPrivateUnread(List<QueryDocumentSnapshot> chats) async {
-    int total = 0;
-    for (final chat in chats) {
-      try {
-        final messages = await FirebaseFirestore.instance
-            .collection('chats')
-            .doc(chat.id)
-            .collection('messages')
-            .where('isRead', isEqualTo: false)
-            .where('senderId', isNotEqualTo: _username)
-            .get();
-        total += messages.docs.length;
-      } catch (_) {}
-    }
-    return total;
-  }
-
   Widget _bankLogsTile() {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('bank_change_logs')
-          .where('isRead', isEqualTo: false)
-          .snapshots(),
+      stream: _bankLogsStream,
       builder: (context, snapshot) {
         final unreadCount = snapshot.data?.docs.length ?? 0;
         return _actionTile(

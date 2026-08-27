@@ -97,13 +97,15 @@ class PaySlipPage extends StatelessWidget {
     final basicSalary = (data['basicSalary'] ?? 0).toDouble();
     final allowance = (data['allowance'] ?? 0).toDouble();
     final kpiBonus = (data['kpiBonus'] ?? 0).toDouble();
+    final otHours = (data['otHours'] ?? 0).toDouble();
+    final otAmount = (data['otAmount'] ?? 0).toDouble();
     final socialSecurity = (data['socialSecurity'] ?? 0).toDouble();
     final leaveDeduction = (data['leaveDeduction'] ?? 0).toDouble();
     final lateMinutes = (data['lateMinutes'] ?? 0).toDouble();
     final lateAmount = (data['lateAmount'] ?? 0).toDouble();
     final netSalary = (data['netSalary'] ?? 0).toDouble();
 
-    final totalEarnings = basicSalary + allowance + kpiBonus;
+    final totalEarnings = basicSalary + allowance + kpiBonus + otAmount;
     final totalDeductions = socialSecurity + leaveDeduction + lateAmount;
 
     return Container(
@@ -251,6 +253,11 @@ class PaySlipPage extends StatelessWidget {
                 _row('Basic Salary', basicSalary, false),
                 _row('Allowance', allowance, false),
                 _row('KPI Bonus', kpiBonus, false),
+                _row(
+                  'Over Time${otHours > 0 ? " (${_formatHours(otHours)} hrs)" : ""}',
+                  otAmount,
+                  false,
+                ),
                 _subtotal('Total Earnings', totalEarnings,
                     AppTheme.greenIcon),
                 const SizedBox(height: 20),
@@ -359,6 +366,9 @@ class PaySlipPage extends StatelessWidget {
       ),
     );
   }
+
+  String _formatHours(double h) =>
+      h % 1 == 0 ? h.toStringAsFixed(0) : h.toStringAsFixed(1);
 
   String _formatNumber(double value) {
     final isNegative = value < 0;

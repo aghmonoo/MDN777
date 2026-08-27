@@ -392,6 +392,7 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .where('username', isEqualTo: other)
+          .where('role', isEqualTo: 'admin')
           .limit(1)
           .get();
       if (snap.docs.isNotEmpty) {

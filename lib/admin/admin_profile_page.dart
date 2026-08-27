@@ -46,7 +46,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
           return CustomScrollView(
             slivers: [
               SliverAppBar(
-                expandedHeight: 240,
+                expandedHeight: 270,
                 pinned: true,
                 backgroundColor: const Color(0xFF3730A3),
                 foregroundColor: Colors.white,
@@ -125,7 +125,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 40, 20, 36),
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -661,6 +661,10 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
+              Navigator.pop(ctx);
+              if (context.mounted) {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+              }
               await FirebaseAuth.instance.signOut();
             },
             child: const Text('Logout'),

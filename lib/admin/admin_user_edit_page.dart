@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import '../theme.dart';
 import '../documents_section.dart';
 
@@ -16,7 +18,11 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
   final _usernameController = TextEditingController();
   final _displayNameController = TextEditingController();
   final _employeeIdController = TextEditingController();
+  final _emailController = TextEditingController();
   final _batchController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  bool _obscurePassword = true;
 
   String _role = 'employee';
   String _department = 'Moderation';
@@ -49,10 +55,12 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         _usernameController.text = data['username'] ?? '';
         _displayNameController.text = data['displayName'] ?? '';
         _employeeIdController.text = data['employeeId'] ?? '';
+        _emailController.text = data['email'] ?? '';
         _batchController.text = (data['batch'] ?? '').toString();
         _role = data['role'] ?? 'employee';
         _department = data['department'] ?? 'Moderation';
-        _position = data['position'] ?? 'QA';
+        final pos = (data['position'] ?? 'QA').toString();
+        _position = const ['QA', 'TL', 'Mod'].contains(pos) ? pos : 'QA';
 
         if (data['joinDate'] is Timestamp) {
           _joinDate = (data['joinDate'] as Timestamp).toDate();
@@ -84,6 +92,14 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     }
   }
 
+  void _emailToUsername(String value) {
+    if (_isEditing) return;
+    final v = value.trim();
+    if (!v.contains('@')) return;
+    _usernameController.text = v.split('@').first.toLowerCase();
+    setState(() {});
+  }
+
   Future<void> _save() async {
     final username = _usernameController.text.trim();
     final displayName = _displayNameController.text.trim();
@@ -93,6 +109,13 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     if (username.isEmpty || displayName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Username and Display Name are required')),
+      );
+      return;
+    }
+
+    if (!_isEditing && _passwordController.text.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password must be at least 6 characters')),
       );
       return;
     }
@@ -130,6 +153,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
 
       final data = <String, dynamic>{
         'username': username,
+        'email': _emailController.text.trim(),
         'displayName': displayName,
         'employeeId': employeeId,
         'role': _role,
@@ -171,10 +195,52 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
           Navigator.pop(context);
         }
       } else {
-        await FirebaseFirestore.instance.collection('users').add(data);
+        FirebaseApp? secondaryApp;
+        try {
+          try {
+            secondaryApp = await Firebase.initializeApp(
+              name: 'SecondaryUserCreator',
+              options: Firebase.app().options,
+            );
+          } catch (_) {
+            secondaryApp = Firebase.app('SecondaryUserCreator');
+          }
 
-        if (mounted) {
-          _showCreateSuccessDialog(username);
+          final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+          final cred = await secondaryAuth.createUserWithEmailAndPassword(
+            email: '$username@staffconnect.app',
+            password: _passwordController.text,
+          );
+          final uid = cred.user!.uid;
+          await secondaryAuth.signOut();
+
+          final createData = Map<String, dynamic>.from(data)
+            ..removeWhere((key, value) => value is FieldValue);
+          createData['createdAt'] = FieldValue.serverTimestamp();
+
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .set(createData);
+
+          if (mounted) {
+            _showCreateSuccessDialog(username);
+          }
+        } on FirebaseAuthException catch (e) {
+          final msg = e.code == 'email-already-in-use'
+              ? 'Login account for "$username" already exists'
+              : e.code == 'weak-password'
+                  ? 'Password too weak'
+                  : 'Auth error: ${e.code}';
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(msg), backgroundColor: Colors.red),
+            );
+          }
+        } finally {
+          try {
+            await secondaryApp?.delete();
+          } catch (_) {}
         }
       }
     } catch (e) {
@@ -207,68 +273,30 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
                   color: Colors.green, size: 20),
             ),
             const SizedBox(width: 10),
-            const Text('Profile Created'),
+            const Text('User Created'),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('User profile created in database.'),
-            const SizedBox(height: 16),
-            const Text(
-              'Next Step:',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
+            const Text('Login account and profile created.'),
+            const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: AppTheme.primarySurface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFCD34D)),
+                border: Border.all(color: AppTheme.primarySoft),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Create login account in Firebase Console:',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                      color: Color(0xFF92400E),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    '1. Open Firebase Console\n2. Authentication → Users\n3. Click "Add user"',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF78350F),
-                      height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      'Email: $username@staffconnect.app',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
+              child: Text(
+                'Email: $username@staffconnect.app',
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textPrimary,
+                ),
               ),
             ),
           ],
@@ -276,7 +304,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         actions: [
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3730A3),
+              backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
             ),
             onPressed: () {
@@ -295,7 +323,9 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     _usernameController.dispose();
     _displayNameController.dispose();
     _employeeIdController.dispose();
+    _emailController.dispose();
     _batchController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -391,6 +421,37 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
                           icon: Icons.badge_outlined,
                           helper: 'e.g. EMP-001 or ADMIN-001',
                         ),
+                        const Divider(height: 1, color: AppTheme.border),
+                        _input(
+                          controller: _emailController,
+                          label: 'Company Email',
+                          icon: Icons.mail_outline,
+                          keyboardType: TextInputType.emailAddress,
+                          helper: 'Optional - for records only',
+                          onChanged: _isEditing ? null : _emailToUsername,
+                        ),
+                        if (!_isEditing) ...[
+                          const Divider(height: 1, color: AppTheme.border),
+                          _input(
+                            controller: _passwordController,
+                            label: 'Password *',
+                            icon: Icons.lock_outline,
+                            helper: 'Minimum 6 characters',
+                            obscureText: _obscurePassword,
+                            suffix: IconButton(
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                size: 18,
+                                color: AppTheme.textSecondary,
+                              ),
+                              onPressed: () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -454,6 +515,8 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
                                     value: 'QA', child: Text('QA')),
                                 DropdownMenuItem(
                                     value: 'TL', child: Text('TL')),
+                                DropdownMenuItem(
+                                    value: 'Mod', child: Text('Mod')),
                               ],
                               onChanged: (v) =>
                                   setState(() => _position = v!),
@@ -535,6 +598,9 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     String? helper,
     bool enabled = true,
     TextInputType? keyboardType,
+    bool obscureText = false,
+    Widget? suffix,
+    ValueChanged<String>? onChanged,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
@@ -542,6 +608,8 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         controller: controller,
         enabled: enabled,
         keyboardType: keyboardType,
+        obscureText: obscureText,
+        onChanged: onChanged,
         style: TextStyle(
           fontSize: 14,
           color: enabled ? AppTheme.textPrimary : AppTheme.textTertiary,
@@ -563,6 +631,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
           ),
           prefixIconConstraints:
               const BoxConstraints(minWidth: 0, minHeight: 0),
+          suffixIcon: suffix,
           border: InputBorder.none,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
