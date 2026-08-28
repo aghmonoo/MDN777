@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../user_access.dart';
 import '../theme.dart';
 import '../group_chat_page.dart';
 import '../private_chat_page.dart';
@@ -16,6 +17,7 @@ class AdminChatPage extends StatefulWidget {
 class _AdminChatPageState extends State<AdminChatPage> {
   late final String _adminUsername;
   late final Stream<QuerySnapshot> _groupMessagesStream;
+  late final Stream<QuerySnapshot> _managementMessagesStream;
   late final Stream<QuerySnapshot> _myChatsStream;
 
   @override
@@ -27,6 +29,13 @@ class _AdminChatPageState extends State<AdminChatPage> {
     _groupMessagesStream = db
         .collection('groups')
         .doc('general')
+        .collection('messages')
+        .orderBy('sentAt', descending: true)
+        .limit(50)
+        .snapshots();
+    _managementMessagesStream = db
+        .collection('groups')
+        .doc(UserAccess.managementGroupId)
         .collection('messages')
         .orderBy('sentAt', descending: true)
         .limit(50)
@@ -91,9 +100,21 @@ class _AdminChatPageState extends State<AdminChatPage> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         children: [
-          _sectionLabel('GROUP'),
+          _sectionLabel('GROUPS'),
           const SizedBox(height: 8),
           _buildGroupChatCard(context, adminUsername),
+          if (UserAccess.canUseManagementGroup) ...[
+            const SizedBox(height: 10),
+            _buildGroupChatCard(
+              context,
+              adminUsername,
+              stream: _managementMessagesStream,
+              groupId: UserAccess.managementGroupId,
+              title: UserAccess.managementGroupTitle,
+              emptyLabel: 'Admins, TL and QA',
+              lastReadField: 'managementLastReadAt',
+            ),
+          ],
           const SizedBox(height: 20),
           _sectionLabel('DIRECT MESSAGES'),
           const SizedBox(height: 8),
@@ -127,11 +148,19 @@ class _AdminChatPageState extends State<AdminChatPage> {
     );
   }
 
-  Widget _buildGroupChatCard(BuildContext context, String adminUsername) {
+  Widget _buildGroupChatCard(
+    BuildContext context,
+    String adminUsername, {
+    Stream<QuerySnapshot>? stream,
+    String groupId = 'general',
+    String title = 'Group Chat',
+    String emptyLabel = 'All staff conversation',
+    String lastReadField = 'groupLastReadAt',
+  }) {
     return StreamBuilder<QuerySnapshot>(
-      stream: _groupMessagesStream,
+      stream: stream ?? _groupMessagesStream,
       builder: (context, snapshot) {
-        String lastMessage = 'All staff conversation';
+        String lastMessage = emptyLabel;
         String lastSender = '';
         String lastSenderId = '';
         Timestamp? lastTime;
@@ -202,7 +231,14 @@ class _AdminChatPageState extends State<AdminChatPage> {
               borderRadius: BorderRadius.circular(16),
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const GroupChatPage()),
+                MaterialPageRoute(
+                  builder: (_) => GroupChatPage(
+                    groupId: groupId,
+                    title: title,
+                    subtitle: emptyLabel,
+                    lastReadField: lastReadField,
+                  ),
+                ),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(14),
@@ -235,7 +271,7 @@ class _AdminChatPageState extends State<AdminChatPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Group Chat',
+                            title,
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: isUnread

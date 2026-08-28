@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import '../theme.dart';
 import '../documents_section.dart';
 
@@ -207,12 +208,30 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
           }
 
           final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-          final cred = await secondaryAuth.createUserWithEmailAndPassword(
-            email: '$username@staffconnect.app',
-            password: _passwordController.text,
-          );
-          final uid = cred.user!.uid;
-          await secondaryAuth.signOut();
+          final loginEmail = '$username@staffconnect.app';
+
+          String uid;
+          try {
+            final cred = await secondaryAuth.createUserWithEmailAndPassword(
+              email: loginEmail,
+              password: _passwordController.text,
+            );
+            uid = cred.user!.uid;
+            await secondaryAuth.signOut();
+          } on FirebaseAuthException catch (e) {
+            if (e.code != 'email-already-in-use') rethrow;
+            // The login account outlived its profile - most often the staff
+            // member was deleted and is now being re-added. Take it over by
+            // setting the new password rather than blocking the username.
+            final result = await FirebaseFunctions.instanceFor(
+              region: 'asia-southeast1',
+            ).httpsCallable('adminSetPassword').call<Map<String, dynamic>>({
+              'username': username,
+              'newPassword': _passwordController.text,
+            });
+            uid = (result.data['uid'] ?? '').toString();
+            if (uid.isEmpty) rethrow;
+          }
 
           final createData = Map<String, dynamic>.from(data)
             ..removeWhere((key, value) => value is FieldValue);
@@ -228,7 +247,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
           }
         } on FirebaseAuthException catch (e) {
           final msg = e.code == 'email-already-in-use'
-              ? 'Login account for "$username" already exists'
+              ? 'Could not reuse the existing login for "$username"'
               : e.code == 'weak-password'
                   ? 'Password too weak'
                   : 'Auth error: ${e.code}';

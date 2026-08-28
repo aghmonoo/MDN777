@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'user_access.dart';
 import 'theme.dart';
 import 'announcement_detail_page.dart';
 import 'group_chat_page.dart';
@@ -71,40 +72,49 @@ class _NotificationInboxPageState extends State<NotificationInboxPage> {
       }
     } catch (_) {}
 
-    try {
-      final grpSnap = await FirebaseFirestore.instance
-          .collection('groups')
-          .doc('general')
-          .collection('messages')
-          .orderBy('sentAt', descending: true)
-          .limit(50)
-          .get();
-      for (final doc in grpSnap.docs) {
-        final data = doc.data();
-        final senderId = data['senderId'] ?? '';
-        if (senderId == _username) continue;
-        final readBy = (data['readBy'] as List?) ?? [];
-        if (readBy.contains(_username)) continue;
+    final groupIds = <String>[
+      'general',
+      if (UserAccess.canUseManagementGroup) UserAccess.managementGroupId,
+    ];
 
-        final text = (data['text'] ?? '').toString();
-        String preview = text;
-        if (preview.isEmpty) {
-          if (data['imageUrl'] != null) {
-            preview = 'Photo';
-          } else if (data['fileUrl'] != null) {
-            preview = data['fileName'] ?? 'File';
+    for (final groupId in groupIds) {
+      try {
+        final grpSnap = await FirebaseFirestore.instance
+            .collection('groups')
+            .doc(groupId)
+            .collection('messages')
+            .orderBy('sentAt', descending: true)
+            .limit(50)
+            .get();
+        for (final doc in grpSnap.docs) {
+          final data = doc.data();
+          final senderId = data['senderId'] ?? '';
+          if (senderId == _username) continue;
+          final readBy = (data['readBy'] as List?) ?? [];
+          if (readBy.contains(_username)) continue;
+
+          final text = (data['text'] ?? '').toString();
+          String preview = text;
+          if (preview.isEmpty) {
+            if (data['imageUrl'] != null) {
+              preview = 'Photo';
+            } else if (data['fileUrl'] != null) {
+              preview = data['fileName'] ?? 'File';
+            }
           }
-        }
 
-        items.add(NotifItem(
-          type: 'group_chat',
-          id: doc.id,
-          title: data['senderName'] ?? 'Unknown',
-          subtitle: preview,
-          timestamp: data['sentAt'] as Timestamp?,
-        ));
-      }
-    } catch (_) {}
+          items.add(NotifItem(
+            type: 'group_chat',
+            id: doc.id,
+            title: data['senderName'] ?? 'Unknown',
+            subtitle: groupId == 'general'
+                ? preview
+                : '${UserAccess.managementGroupTitle} - $preview',
+            timestamp: data['sentAt'] as Timestamp?,
+          ));
+        }
+      } catch (_) {}
+    }
 
     try {
       final chatsSnap = await FirebaseFirestore.instance

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'theme.dart';
 import 'group_chat_page.dart';
 import 'private_chat_page.dart';
+import 'user_access.dart';
 
 class ChatPage extends StatelessWidget {
   const ChatPage({super.key});
@@ -54,6 +55,17 @@ class ChatPage extends StatelessWidget {
           children: [
             _sectionLabel('Group'),
             _buildGroupChatCard(context, username),
+            if (UserAccess.canUseManagementGroup) ...[
+              const SizedBox(height: 10),
+              _buildGroupChatCard(
+                context,
+                username,
+                groupId: UserAccess.managementGroupId,
+                title: UserAccess.managementGroupTitle,
+                emptyLabel: 'Admins, TL and QA',
+                lastReadField: 'managementLastReadAt',
+              ),
+            ],
             const SizedBox(height: 20),
             _sectionLabel('Direct Messages'),
             if (adminDocs.isEmpty)
@@ -118,17 +130,24 @@ class ChatPage extends StatelessWidget {
     );
   }
 
-  Widget _buildGroupChatCard(BuildContext context, String username) {
+  Widget _buildGroupChatCard(
+    BuildContext context,
+    String username, {
+    String groupId = 'general',
+    String title = 'Group Chat',
+    String emptyLabel = 'All staff conversation',
+    String lastReadField = 'groupLastReadAt',
+  }) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('groups')
-          .doc('general')
+          .doc(groupId)
           .collection('messages')
           .orderBy('sentAt', descending: true)
           .limit(20)
           .snapshots(),
       builder: (context, snapshot) {
-        String lastMessage = 'All staff conversation';
+        String lastMessage = emptyLabel;
         String lastSender = '';
         String lastSenderId = '';
         Timestamp? lastTime;
@@ -181,12 +200,19 @@ class ChatPage extends StatelessWidget {
           isGroup: true,
           isUnread: isUnread,
           unreadCount: unreadCount,
-          title: 'Group Chat',
+          title: title,
           subtitle: previewText,
           time: _formatTime(lastTime),
           onTap: () => Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const GroupChatPage()),
+            MaterialPageRoute(
+              builder: (_) => GroupChatPage(
+                groupId: groupId,
+                title: title,
+                subtitle: emptyLabel,
+                lastReadField: lastReadField,
+              ),
+            ),
           ),
         );
       },

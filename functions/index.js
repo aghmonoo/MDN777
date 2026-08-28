@@ -105,6 +105,24 @@ async function tokensForAll(excludeUsername) {
   return tokens;
 }
 
+/** Admins plus Management staff holding a TL or QA position. */
+async function tokensForManagement(excludeUsername) {
+  const snap = await db().collection("users").get();
+  const tokens = [];
+  snap.forEach((doc) => {
+    const data = doc.data();
+    const eligible = data.role === "admin" ||
+      (data.department === "Management" &&
+       (data.position === "TL" || data.position === "QA"));
+    if (!eligible) return;
+    if (excludeUsername && data.username === excludeUsername) return;
+    (data.fcmTokens || []).forEach((t) => {
+      if (t) tokens.push({token: t, uid: doc.id});
+    });
+  });
+  return tokens;
+}
+
 /** Collects push tokens for a list of usernames. */
 async function tokensForUsernames(usernames) {
   const wanted = [...new Set(usernames.filter(Boolean))];
@@ -216,9 +234,15 @@ exports.notify = onCall(async (request) => {
       throw new HttpsError("permission-denied", "Not your message.");
     }
 
+    const audience = groupId === "management" ?
+      await tokensForManagement(me) :
+      await tokensForAll(me);
+
+    const label = groupId === "management" ? "Management" : "group chat";
+
     await push(
-        await tokensForAll(me),
-        `${data.senderName || me} - group chat`,
+        audience,
+        `${data.senderName || me} - ${label}`,
         preview(data.text, "Sent an attachment"),
         {type: "group", groupId: groupId},
     );
@@ -276,4 +300,54 @@ exports.notify = onCall(async (request) => {
   }
 
   throw new HttpsError("invalid-argument", `Unknown type: ${type}`);
+});
+
+
+/** True when the profile may use the management group. */
+function isManagementProfile(data) {
+  return data.role === "admin" ||
+    (data.department === "Management" &&
+     (data.position === "TL" || data.position === "QA"));
+}
+
+/**
+ * Lists the members of a group.
+ *
+ * Employees cannot read other staff profiles directly, so the roster is
+ * assembled server-side and trimmed to the fields the chat UI needs.
+ *
+ * data: { groupId: "general" | "management" }
+ */
+exports.listGroupMembers = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) throw new HttpsError("unauthenticated", "Sign in required.");
+
+  const groupId = String(request.data.groupId || "general");
+
+  const meSnap = await db().collection("users").doc(auth.uid).get();
+  if (!meSnap.exists) {
+    throw new HttpsError("permission-denied", "No staff profile.");
+  }
+
+  if (groupId === "management" && !isManagementProfile(meSnap.data())) {
+    throw new HttpsError("permission-denied", "Not a member of this group.");
+  }
+
+  const snap = await db().collection("users").get();
+  const members = [];
+  snap.forEach((doc) => {
+    const d = doc.data();
+    if (!d.username) return;
+    if (groupId === "management" && !isManagementProfile(d)) return;
+    members.push({
+      username: d.username,
+      displayName: d.displayName || d.username,
+      role: d.role || "employee",
+      department: d.department || "",
+      position: d.position || "",
+    });
+  });
+
+  members.sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return {members: members};
 });

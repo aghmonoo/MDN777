@@ -448,14 +448,26 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
             uid = cred.user!.uid;
           } on FirebaseAuthException catch (e) {
             if (e.code != 'email-already-in-use') rethrow;
-            // The login account already exists (usually because an earlier
-            // import created it but failed before writing the profile).
-            // Sign in to recover the uid and rewrite the profile.
-            final cred = await secondaryAuth.signInWithEmailAndPassword(
-              email: loginEmail,
-              password: password,
-            );
-            uid = cred.user!.uid;
+            // The login account already exists - either an earlier import
+            // failed before writing the profile, or the staff member was
+            // deleted and is being re-added. Recover the uid, resetting the
+            // password when the one in the sheet no longer matches.
+            try {
+              final cred = await secondaryAuth.signInWithEmailAndPassword(
+                email: loginEmail,
+                password: password,
+              );
+              uid = cred.user!.uid;
+            } on FirebaseAuthException {
+              final result = await FirebaseFunctions.instanceFor(
+                region: 'asia-southeast1',
+              ).httpsCallable('adminSetPassword').call<Map<String, dynamic>>({
+                'username': username,
+                'newPassword': password,
+              });
+              uid = (result.data['uid'] ?? '').toString();
+              if (uid.isEmpty) rethrow;
+            }
             repaired = true;
           }
 

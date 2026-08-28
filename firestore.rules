@@ -55,6 +55,7 @@ service cloud.firestore {
                  'documents',
                  'uid',
                  'groupLastReadAt',
+                 'managementLastReadAt',
                  'fcmTokens'
                ]));
     }
@@ -110,20 +111,35 @@ service cloud.firestore {
     }
 
     // ---------- group chat ----------
+    // `general` is every member of staff. `management` is admins plus
+    // Management staff holding a TL or QA position - Moderation staff and
+    // Management/Mod are excluded.
+    function inManagement() {
+      let profile = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return profile.role == 'admin'
+        || (profile.department == 'Management'
+            && profile.position in ['TL', 'QA']);
+    }
+
+    function canUseGroup(groupId) {
+      return signedIn()
+        && (groupId != 'management' || inManagement());
+    }
+
     match /groups/{groupId} {
-      allow read: if signedIn();
+      allow read: if canUseGroup(groupId);
       allow write: if isAdmin();
     }
 
     match /groups/{groupId}/messages/{msgId} {
-      allow read: if signedIn();
+      allow read: if canUseGroup(groupId);
 
-      allow create: if signedIn()
+      allow create: if canUseGroup(groupId)
         && request.resource.data.senderId == me();
 
       allow update: if isAdmin()
-        || (signedIn() && changed().hasOnly(['readBy']))
-        || (signedIn() && resource.data.senderId == me());
+        || (canUseGroup(groupId) && changed().hasOnly(['readBy']))
+        || (canUseGroup(groupId) && resource.data.senderId == me());
 
       allow delete: if isAdmin();
     }

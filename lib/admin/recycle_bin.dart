@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import '../theme.dart';
 
 /// Soft-delete store. Deleted users / messages / chats are copied here
@@ -86,9 +88,12 @@ class RecycleBin {
     }
   }
 
+  /// Permanently removes bin entries. For staff profiles this also removes
+  /// the login account, so the username becomes free to use again.
   static Future<void> purge(
     List<QueryDocumentSnapshot<Map<String, dynamic>>> items,
   ) async {
+    await _deleteLoginAccounts(items);
     final db = FirebaseFirestore.instance;
     for (var i = 0; i < items.length; i += 300) {
       final end = (i + 300 > items.length) ? items.length : i + 300;
@@ -97,6 +102,26 @@ class RecycleBin {
         writeBatch.delete(d.reference);
       }
       await writeBatch.commit();
+    }
+  }
+
+  /// Removes the login accounts behind any staff profiles in [items].
+  static Future<void> _deleteLoginAccounts(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> items,
+  ) async {
+    for (final d in items) {
+      final m = d.data();
+      if ((m['type'] ?? '') != 'user') continue;
+      final username =
+          ((m['data'] as Map?)?['username'] ?? '').toString().trim();
+      if (username.isEmpty) continue;
+      try {
+        await FirebaseFunctions.instanceFor(region: 'asia-southeast1')
+            .httpsCallable('adminDeleteAuthUser')
+            .call<Map<String, dynamic>>({'username': username});
+      } catch (e) {
+        debugPrint('Could not delete login account for $username: $e');
+      }
     }
   }
 
@@ -110,6 +135,7 @@ class RecycleBin {
           .limit(300)
           .get();
       if (snap.docs.isEmpty) break;
+      await _deleteLoginAccounts(snap.docs);
       final writeBatch = db.batch();
       for (final d in snap.docs) {
         writeBatch.delete(d.reference);

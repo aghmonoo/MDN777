@@ -10,9 +10,28 @@ import 'cloudinary_config.dart';
 import 'theme.dart';
 import 'admin/recycle_bin.dart';
 import 'nav_badges.dart';
+import 'group_members.dart';
 
 class GroupChatPage extends StatefulWidget {
-  const GroupChatPage({super.key});
+  const GroupChatPage({
+    super.key,
+    this.groupId = 'general',
+    this.title = 'Group Chat',
+    this.subtitle = 'All staff',
+    this.lastReadField = 'groupLastReadAt',
+  });
+
+  /// Document id under `groups/`.
+  final String groupId;
+
+  /// Shown in the app bar.
+  final String title;
+
+  /// Shown under the title.
+  final String subtitle;
+
+  /// Field on the user profile holding this group's last-read timestamp.
+  final String lastReadField;
 
   @override
   State<GroupChatPage> createState() => _GroupChatPageState();
@@ -20,6 +39,7 @@ class GroupChatPage extends StatefulWidget {
 
 class _GroupChatPageState extends State<GroupChatPage> {
   final _messageController = TextEditingController();
+  final _messageFocus = FocusNode();
   final _scrollController = ScrollController();
   String _displayName = '';
   String _username = '';
@@ -35,6 +55,11 @@ class _GroupChatPageState extends State<GroupChatPage> {
   Map<String, dynamic>? _replyTo;
   String? _replyToId;
 
+  // Roster + @mention state
+  List<GroupMember> _members = [];
+  List<GroupMember> _mentionMatches = [];
+  int _mentionStart = -1;
+
   late final CloudinaryPublic _cloudinary;
   late final Stream<QuerySnapshot> _messagesStream;
 
@@ -49,12 +74,195 @@ class _GroupChatPageState extends State<GroupChatPage> {
     // Firestore but is not read on every app start.
     _messagesStream = FirebaseFirestore.instance
         .collection('groups')
-        .doc('general')
+        .doc(widget.groupId)
         .collection('messages')
         .orderBy('sentAt', descending: false)
         .limitToLast(_messageWindow)
         .snapshots();
     _loadUserInfo();
+    _loadMembers();
+    _messageController.addListener(_onInputChanged);
+  }
+
+  Future<void> _loadMembers() async {
+    final cached = GroupMembers.cached(widget.groupId);
+    if (cached != null && mounted) setState(() => _members = cached);
+
+    final members = await GroupMembers.load(widget.groupId, refresh: true);
+    if (mounted) setState(() => _members = members);
+  }
+
+  /// Watches the composer for an `@` mention being typed.
+  void _onInputChanged() {
+    final selection = _messageController.selection;
+    if (!selection.isValid || !selection.isCollapsed) {
+      _clearMentions();
+      return;
+    }
+
+    final cursor = selection.baseOffset;
+    final before = _messageController.text.substring(0, cursor);
+
+    // `@` must start the message or follow whitespace, and the query itself
+    // carries no spaces - so picking a name with spaces ends the lookup.
+    final match = RegExp(r'(?:^|\s)@([^\s@]*)$').firstMatch(before);
+    if (match == null) {
+      _clearMentions();
+      return;
+    }
+
+    final query = match.group(1) ?? '';
+    final matches = _members
+        .where((m) => m.username != _username && m.matches(query))
+        .take(6)
+        .toList();
+
+    if (matches.isEmpty) {
+      _clearMentions();
+      return;
+    }
+
+    setState(() {
+      _mentionStart = cursor - query.length - 1;
+      _mentionMatches = matches;
+    });
+  }
+
+  void _clearMentions() {
+    if (_mentionMatches.isEmpty && _mentionStart < 0) return;
+    setState(() {
+      _mentionMatches = [];
+      _mentionStart = -1;
+    });
+  }
+
+  void _insertMention(GroupMember member) {
+    if (_mentionStart < 0) return;
+
+    final text = _messageController.text;
+    final cursor = _messageController.selection.baseOffset;
+    final replacement = '@${member.displayName} ';
+    final updated =
+        text.replaceRange(_mentionStart, cursor, replacement);
+
+    final caret = _mentionStart + replacement.length;
+
+    _messageController.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: caret),
+      composing: TextRange.empty,
+    );
+    _clearMentions();
+
+    // Tapping the list blurs the field on mobile browsers, which drops the
+    // keyboard - put focus straight back so typing can continue.
+    _messageFocus.requestFocus();
+
+    // Re-focusing makes the browser select the whole field, which would wipe
+    // the name on the next keystroke. Put the caret back after the rebuild.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _messageController.selection =
+          TextSelection.collapsed(offset: caret);
+    });
+  }
+
+  void _showMembersSheet() {
+    if (_members.isEmpty) return;
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          builder: (_, scrollController) {
+            return Column(
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.border,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.groups,
+                          size: 18, color: AppTheme.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_members.length} members',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: AppTheme.border),
+                Expanded(
+                  child: ListView.separated(
+                    controller: scrollController,
+                    itemCount: _members.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, color: AppTheme.border),
+                    itemBuilder: (_, i) {
+                      final m = _members[i];
+                      final initial = m.displayName.isNotEmpty
+                          ? m.displayName[0].toUpperCase()
+                          : '?';
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: m.isAdmin
+                              ? AppTheme.primary
+                              : AppTheme.primarySurface,
+                          child: Text(
+                            initial,
+                            style: TextStyle(
+                              color: m.isAdmin
+                                  ? Colors.white
+                                  : AppTheme.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          m.displayName,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '@${m.username} - ${m.subtitle}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _loadUserInfo() async {
@@ -128,13 +336,13 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
       final msgRef = await FirebaseFirestore.instance
           .collection('groups')
-          .doc('general')
+          .doc(widget.groupId)
           .collection('messages')
           .add(messageData);
 
       unawaited(PushNotifications.notify({
         'type': 'group',
-        'groupId': 'general',
+        'groupId': widget.groupId,
         'msgId': msgRef.id,
       }));
 
@@ -167,7 +375,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
     try {
       final msgRef = FirebaseFirestore.instance
           .collection('groups')
-          .doc('general')
+          .doc(widget.groupId)
           .collection('messages')
           .doc(messageId);
 
@@ -401,7 +609,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
     try {
       final db = FirebaseFirestore.instance;
       final messages =
-          db.collection('groups').doc('general').collection('messages');
+          db.collection('groups').doc(widget.groupId).collection('messages');
 
       final groupId = RecycleBin.newRef().id;
 
@@ -418,9 +626,9 @@ class _GroupChatPageState extends State<GroupChatPage> {
               originalPath: 'groups/general/messages/${d.id}',
               data: data,
               label: _msgLabel(data),
-              sublabel: 'Group Chat - ${data['senderName'] ?? '-'}',
+              sublabel: '${widget.title} - ${data['senderName'] ?? '-'}',
               groupId: groupId,
-              groupLabel: 'Group Chat - cleared by admin',
+              groupLabel: '${widget.title} - cleared by admin',
             ),
           );
           writeBatch.delete(d.reference);
@@ -480,7 +688,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
       final db = FirebaseFirestore.instance;
       final ref = db
           .collection('groups')
-          .doc('general')
+          .doc(widget.groupId)
           .collection('messages')
           .doc(messageId);
       final snap = await ref.get();
@@ -494,7 +702,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
           originalPath: 'groups/general/messages/$messageId',
           data: data,
           label: _msgLabel(data),
-          sublabel: 'Group Chat - ${data['senderName'] ?? '-'}',
+          sublabel: '${widget.title} - ${data['senderName'] ?? '-'}',
         ),
       );
       writeBatch.delete(ref);
@@ -752,7 +960,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
       return;
     }
     _lastGroupReadTouch = now;
-    NavBadges.markGroupRead();
+    NavBadges.markGroupRead(field: widget.lastReadField);
   }
 
   // ---- older message pagination ----
@@ -771,7 +979,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
     try {
       final snap = await FirebaseFirestore.instance
               .collection('groups')
-              .doc('general')
+              .doc(widget.groupId)
               .collection('messages')
           .orderBy('sentAt', descending: true)
           .startAfterDocument(oldestShown)
@@ -837,7 +1045,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
     try {
       await FirebaseFirestore.instance
           .collection('groups')
-          .doc('general')
+          .doc(widget.groupId)
           .collection('messages')
           .doc(messageId)
           .update({
@@ -877,7 +1085,9 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
   @override
   void dispose() {
+    _messageController.removeListener(_onInputChanged);
     _messageController.dispose();
+    _messageFocus.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -890,27 +1100,41 @@ class _GroupChatPageState extends State<GroupChatPage> {
         flexibleSpace: Container(
           decoration: const BoxDecoration(gradient: AppTheme.heroGradient),
         ),
-        title: const Row(
+        title: Row(
           children: [
-            CircleAvatar(
+            const CircleAvatar(
               backgroundColor: Colors.white,
               radius: 16,
               child: Icon(Icons.groups, color: AppTheme.primary, size: 18),
             ),
-            SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('Group Chat',
-                    style:
-                        TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                Text(
-                  'All staff',
-                  style: TextStyle(
-                      fontSize: 11, fontWeight: FontWeight.normal),
+            const SizedBox(width: 12),
+            Expanded(
+              child: InkWell(
+                onTap: _members.isEmpty ? null : _showMembersSheet,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(widget.title,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w700)),
+                    Row(
+                      children: [
+                        Text(
+                          _members.isEmpty
+                              ? widget.subtitle
+                              : '${_members.length} members',
+                          style: const TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.normal),
+                        ),
+                        if (_members.isNotEmpty)
+                          const Icon(Icons.chevron_right,
+                              size: 14, color: Colors.white70),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ],
         ),
@@ -1037,9 +1261,119 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 ],
               ),
             ),
+          if (_mentionMatches.isNotEmpty) _buildMentionSuggestions(),
           if (_replyTo != null) _buildReplyPreview(),
           _buildMessageInput(),
         ],
+      ),
+    );
+  }
+
+  /// Renders message text with any @mention of a group member emphasised.
+  Widget _messageText(String text, bool isMe) {
+    final base = TextStyle(
+      color: isMe ? Colors.white : AppTheme.textPrimary,
+      fontSize: 14,
+      height: 1.35,
+    );
+
+    if (_members.isEmpty || !text.contains('@')) {
+      return Text(text, style: base);
+    }
+
+    // Longest names first, so "@Aung Su" never wins over "@Aung Su Su Tun".
+    final names = _members.map((m) => m.displayName).toList()
+      ..sort((a, b) => b.length.compareTo(a.length));
+
+    final spans = <TextSpan>[];
+    var index = 0;
+
+    while (index < text.length) {
+      final at = text.indexOf('@', index);
+      if (at < 0) {
+        spans.add(TextSpan(text: text.substring(index), style: base));
+        break;
+      }
+
+      if (at > index) {
+        spans.add(TextSpan(text: text.substring(index, at), style: base));
+      }
+
+      String? hit;
+      for (final name in names) {
+        if (name.isEmpty) continue;
+        if (text.startsWith(name, at + 1)) {
+          hit = name;
+          break;
+        }
+      }
+
+      if (hit == null) {
+        spans.add(TextSpan(text: '@', style: base));
+        index = at + 1;
+        continue;
+      }
+
+      spans.add(TextSpan(
+        text: '@$hit',
+        style: base.copyWith(
+          fontWeight: FontWeight.w700,
+          color: isMe ? Colors.white : AppTheme.primary,
+        ),
+      ));
+      index = at + 1 + hit.length;
+    }
+
+    return RichText(text: TextSpan(children: spans));
+  }
+
+  Widget _buildMentionSuggestions() {
+    return ExcludeFocus(
+      child: Container(
+        constraints: const BoxConstraints(maxHeight: 220),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: AppTheme.border, width: 0.5)),
+        ),
+        child: ListView.separated(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          itemCount: _mentionMatches.length,
+          separatorBuilder: (_, __) =>
+              const Divider(height: 1, color: AppTheme.border),
+          itemBuilder: (_, i) {
+            final m = _mentionMatches[i];
+            final initial = m.displayName.isNotEmpty
+                ? m.displayName[0].toUpperCase()
+                : '?';
+            return ListTile(
+              dense: true,
+              leading: CircleAvatar(
+                radius: 16,
+                backgroundColor: AppTheme.primarySurface,
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    color: AppTheme.primary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              title: Text(
+                m.displayName,
+                style: const TextStyle(
+                    fontSize: 13.5, fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '@${m.username}',
+                style: const TextStyle(
+                    fontSize: 11.5, color: AppTheme.textSecondary),
+              ),
+              onTap: () => _insertMention(m),
+            );
+          },
+        ),
       ),
     );
   }
@@ -1296,14 +1630,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                           ),
                         ],
                       ),
-                      child: Text(
-                        text,
-                        style: TextStyle(
-                          color: isMe ? Colors.white : AppTheme.textPrimary,
-                          fontSize: 14,
-                          height: 1.35,
-                        ),
-                      ),
+                      child: _messageText(text, isMe),
                     ),
                   ],
                   Padding(
@@ -1428,6 +1755,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
             Expanded(
               child: TextField(
                 controller: _messageController,
+                focusNode: _messageFocus,
                 decoration: InputDecoration(
                   hintText: 'Type a message...',
                   hintStyle: const TextStyle(

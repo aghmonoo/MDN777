@@ -11,6 +11,8 @@ import 'theme.dart';
 import 'home_screen.dart';
 import 'version_gate.dart';
 import 'push_notifications.dart';
+import 'user_access.dart';
+import 'group_members.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,6 +60,9 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.hasData) {
           return const RoleRouter();
         }
+        // Signed out: drop anything cached about the previous account.
+        UserAccess.clear();
+        GroupMembers.clear();
         return const LoginPage();
       },
     );
@@ -95,6 +100,7 @@ class _RoleRouterState extends State<RoleRouter> {
 
     final byUid = await db.collection('users').doc(uid).get();
     if (byUid.exists) {
+      UserAccess.loadFrom(byUid.data());
       unawaited(PushNotifications.start());
       return byUid.data();
     }
@@ -120,6 +126,7 @@ class _RoleRouterState extends State<RoleRouter> {
       // works from the legacy document.
     }
 
+    UserAccess.loadFrom(data);
     unawaited(PushNotifications.start());
     return data;
   }
@@ -195,6 +202,7 @@ class _RoleRouterState extends State<RoleRouter> {
               ElevatedButton.icon(
                 onPressed: () async {
                   await PushNotifications.stop();
+                  UserAccess.clear();
                   await FirebaseAuth.instance.signOut();
                 },
                 icon: const Icon(Icons.logout, size: 18),

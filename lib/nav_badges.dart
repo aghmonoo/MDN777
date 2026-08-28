@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:rxdart/rxdart.dart';
 
+import 'user_access.dart';
+
 /// Unread counters for the navigation badges.
 ///
 /// These streams stay open for as long as the app is running, so they are
@@ -18,13 +20,13 @@ class NavBadges {
 
   static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
-  /// Marks the group chat as read up to now.
-  static Future<void> markGroupRead() async {
+  /// Marks a group chat as read up to now.
+  static Future<void> markGroupRead({String field = 'groupLastReadAt'}) async {
     final uid = _uid;
     if (uid == null) return;
     try {
       await FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'groupLastReadAt': FieldValue.serverTimestamp(),
+        field: FieldValue.serverTimestamp(),
       });
     } catch (_) {
       // Legacy profiles are not keyed by uid; the badge simply falls back
@@ -32,7 +34,10 @@ class NavBadges {
     }
   }
 
-  static Stream<int> groupUnreadStream() {
+  static Stream<int> groupUnreadStream({
+    String groupId = 'general',
+    String lastReadField = 'groupLastReadAt',
+  }) {
     final me = _username;
     final uid = _uid;
     if (me.isEmpty || uid == null) return Stream.value(0);
@@ -42,11 +47,11 @@ class NavBadges {
         .doc(uid)
         .snapshots()
         .switchMap((userSnap) {
-      final lastRead = userSnap.data()?['groupLastReadAt'] as Timestamp?;
+      final lastRead = userSnap.data()?[lastReadField] as Timestamp?;
 
       Query<Map<String, dynamic>> q = FirebaseFirestore.instance
           .collection('groups')
-          .doc('general')
+          .doc(groupId)
           .collection('messages')
           .orderBy('sentAt');
 
@@ -86,11 +91,20 @@ class NavBadges {
     });
   }
 
+  static Stream<int> managementUnreadStream() {
+    if (!UserAccess.canUseManagementGroup) return Stream.value(0);
+    return groupUnreadStream(
+      groupId: UserAccess.managementGroupId,
+      lastReadField: 'managementLastReadAt',
+    );
+  }
+
   static Stream<int> chatUnreadStream() {
-    return Rx.combineLatest2<int, int, int>(
+    return Rx.combineLatest3<int, int, int, int>(
       groupUnreadStream(),
+      managementUnreadStream(),
       privateUnreadStream(),
-      (a, b) => a + b,
+      (a, b, c) => a + b + c,
     );
   }
 
