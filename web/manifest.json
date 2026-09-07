@@ -1,7 +1,7 @@
 {
     "name": "Staff Connect",
     "short_name": "Staff Connect",
-    "start_url": ".",
+    "start_url": "/app/",
     "display": "standalone",
     "background_color": "#F8FAFC",
     "theme_color": "#0284C7",
@@ -31,5 +31,6 @@
             "type": "image/png",
             "purpose": "maskable"
         }
-    ]
+    ],
+    "scope": "/app/"
 }

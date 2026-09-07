@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../payslip_fields.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'dart:typed_data';
 import '../file_download_helper.dart';
@@ -72,26 +73,7 @@ class _AdminPayslipBatchDetailPageState
       final sheet = excel['Payslips'];
       excel.delete('Sheet1');
 
-      final headers = [
-        'employeeId',
-        'username',
-        'displayName',
-        'department',
-        'bankName',
-        'accountNumber',
-        'accountHolderName',
-        'month',
-        'basicSalary',
-        'allowance',
-        'kpiBonus',
-        'otHours',
-        'otAmount',
-        'socialSecurity',
-        'leaveDeduction',
-        'lateMinutes',
-        'lateAmount',
-        'netSalary',
-      ];
+      final headers = [...PayslipFields.headers, 'netSalary'];
 
       for (var i = 0; i < headers.length; i++) {
         final cell = sheet.cell(CellIndex.indexByColumnRow(
@@ -136,14 +118,23 @@ class _AdminPayslipBatchDetailPageState
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 12, rowIndex: rowIndex))
             .value = DoubleCellValue((data['otAmount'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 13, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['socialSecurity'] ?? 0).toDouble());
+            .value =
+            DoubleCellValue((data['publicHolidayDays'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 14, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['leaveDeduction'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['trainingDays'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 15, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['lateMinutes'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['socialSecurity'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 16, rowIndex: rowIndex))
-            .value = DoubleCellValue((data['lateAmount'] ?? 0).toDouble());
+            .value = DoubleCellValue((data['leaveDeduction'] ?? 0).toDouble());
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 17, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['lateMinutes'] ?? 0).toDouble());
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 18, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['lateAmount'] ?? 0).toDouble());
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 19, rowIndex: rowIndex))
+            .value = TextCellValue(data['customReason']?.toString() ?? '');
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 20, rowIndex: rowIndex))
+            .value = DoubleCellValue((data['customAmount'] ?? 0).toDouble());
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 21, rowIndex: rowIndex))
             .value = DoubleCellValue((data['netSalary'] ?? 0).toDouble());
       }
 

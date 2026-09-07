@@ -34,5 +34,146 @@
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
+<style>
+  #installBar{
+    position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483647;
+    display:none;gap:10px;align-items:center;
+    padding:12px 14px;border-radius:14px;
+    background:#0F172A;color:#fff;
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    box-shadow:0 8px 24px rgba(0,0,0,.28);
+  }
+  #installBar .txt{flex:1;min-width:0}
+  #installBar .ttl{font-weight:700;margin-bottom:2px}
+  #installBar .sub{font-size:12.5px;opacity:.82}
+  #installBar button{
+    border:0;border-radius:10px;padding:9px 14px;font-weight:600;font-size:13px;
+    background:#0284C7;color:#fff;cursor:pointer;flex:none;
+  }
+  #installBar .x{background:transparent;color:#fff;opacity:.7;padding:8px 6px;font-size:18px}
+</style>
+<style>
+  #updateBar{
+    position:fixed;left:12px;right:12px;top:12px;z-index:2147483647;
+    display:none;gap:10px;align-items:center;
+    padding:12px 14px;border-radius:14px;
+    background:#0284C7;color:#fff;
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    box-shadow:0 8px 24px rgba(0,0,0,.22);
+  }
+  #updateBar .txt{flex:1;min-width:0;font-weight:600}
+  #updateBar button{
+    border:0;border-radius:10px;padding:9px 14px;font-weight:700;font-size:13px;
+    background:#fff;color:#0284C7;cursor:pointer;flex:none;
+  }
+  #updateBar .x{background:transparent;color:#fff;opacity:.8;padding:8px 6px;font-size:18px;font-weight:400}
+</style>
+<div id="updateBar" role="status">
+  <div class="txt">A new version is ready.</div>
+  <button id="updateGo" type="button">Reload</button>
+  <button class="x" id="updateX" type="button" aria-label="Dismiss">&times;</button>
+</div>
+<script>
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+
+  var bar = document.getElementById('updateBar');
+  document.getElementById('updateGo')
+      .addEventListener('click', function () { location.reload(); });
+  document.getElementById('updateX')
+      .addEventListener('click', function () { bar.style.display = 'none'; });
+
+  function watch(reg) {
+    if (!reg) return;
+
+    // Check again while the app stays open - staff often never close it.
+    setInterval(function () { reg.update(); }, 30 * 60 * 1000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) reg.update();
+    });
+
+    reg.addEventListener('updatefound', function () {
+      var sw = reg.installing;
+      if (!sw) return;
+      sw.addEventListener('statechange', function () {
+        // Only offer a reload when this really is a replacement, not the
+        // very first install.
+        if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+          bar.style.display = 'flex';
+        }
+      });
+    });
+  }
+
+  navigator.serviceWorker.getRegistration().then(watch);
+  navigator.serviceWorker.ready.then(watch);
+})();
+</script>
+<div id="installBar" role="dialog" aria-label="Install Staff Connect">
+  <div class="txt">
+    <div class="ttl">Install Staff Connect</div>
+    <div class="sub" id="installHint">Add it to your home screen for notifications.</div>
+  </div>
+  <button id="installGo" type="button">Install</button>
+  <button class="x" id="installX" type="button" aria-label="Dismiss">&times;</button>
+</div>
+<script>
+(function () {
+  var bar = document.getElementById('installBar');
+  var go = document.getElementById('installGo');
+  var hint = document.getElementById('installHint');
+  var close = document.getElementById('installX');
+  var deferred = null;
+
+  var ua = navigator.userAgent || '';
+  var isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  var standalone = window.matchMedia('(display-mode: standalone)').matches ||
+                   window.navigator.standalone === true;
+
+  function dismissed() {
+    try { return localStorage.getItem('installBarHidden') === '1'; }
+    catch (e) { return false; }
+  }
+  function hide(remember) {
+    bar.style.display = 'none';
+    if (!remember) return;
+    try { localStorage.setItem('installBarHidden', '1'); } catch (e) {}
+  }
+  function show() {
+    if (standalone || dismissed()) return;
+    bar.style.display = 'flex';
+  }
+
+  close.addEventListener('click', function () { hide(true); });
+
+  // Android / desktop Chrome: the browser hands us the install prompt.
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault();
+    deferred = e;
+    go.textContent = 'Install';
+    hint.textContent = 'Add it to your home screen for notifications.';
+    show();
+  });
+
+  go.addEventListener('click', function () {
+    if (deferred) {
+      deferred.prompt();
+      deferred.userChoice.then(function () { deferred = null; hide(true); });
+      return;
+    }
+    // iOS has no install API - show what to tap instead.
+    hint.textContent = 'Tap the Share button, then "Add to Home Screen".';
+    go.style.display = 'none';
+  });
+
+  window.addEventListener('appinstalled', function () { hide(true); });
+
+  if (isIOS && !standalone) {
+    hint.textContent = 'Tap Share, then "Add to Home Screen".';
+    go.style.display = 'none';
+    setTimeout(show, 2500);
+  }
+})();
+</script>
 </body>
 </html>

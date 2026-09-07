@@ -1076,11 +1076,153 @@ class _GroupChatPageState extends State<GroupChatPage> {
     return '${dt.day}/${dt.month}/${dt.year}, $timeStr';
   }
 
-  String _formatReadStatus(List<dynamic> readBy) {
-    final readers = readBy.where((u) => u != _username).length;
+  /// How many members other than the sender have opened the message.
+  int _readerCount(List<dynamic> readBy, String senderId) =>
+      readBy.where((u) => u != senderId).toSet().length;
+
+  /// Everyone in the group except the sender.
+  int _audienceCount(String senderId) =>
+      _members.where((m) => m.username != senderId).length;
+
+  String _formatReadStatus(List<dynamic> readBy, String senderId) {
+    final readers = _readerCount(readBy, senderId);
+    final audience = _audienceCount(senderId);
+    if (audience > 0) return '$readers/$audience read';
     if (readers == 0) return 'Sent';
-    if (readers == 1) return '1 Read';
-    return '$readers Read';
+    return '$readers read';
+  }
+
+  /// Admin-only: who has and has not opened this message.
+  void _showReadReceipts(List<dynamic> readBy, String senderId) {
+    if (!_isAdmin) return;
+
+    final readers = readBy.map((e) => e.toString()).toSet();
+    final audience =
+        _members.where((m) => m.username != senderId).toList();
+    final unread =
+        audience.where((m) => !readers.contains(m.username)).toList();
+    final read = audience.where((m) => readers.contains(m.username)).toList();
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          builder: (_, scrollController) {
+            Widget header(String text, Color color) => Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 6),
+                  child: Text(
+                    text,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: color,
+                    ),
+                  ),
+                );
+
+            Widget person(GroupMember m, bool hasRead) => ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: hasRead
+                        ? AppTheme.primarySurface
+                        : const Color(0xFFFEE2E2),
+                    child: Text(
+                      m.displayName.isNotEmpty
+                          ? m.displayName[0].toUpperCase()
+                          : '?',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: hasRead
+                            ? AppTheme.primary
+                            : const Color(0xFFDC2626),
+                      ),
+                    ),
+                  ),
+                  title: Text(
+                    m.displayName,
+                    style: const TextStyle(
+                        fontSize: 13.5, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    '@${m.username}',
+                    style: const TextStyle(
+                        fontSize: 11.5, color: AppTheme.textSecondary),
+                  ),
+                );
+
+            return Column(
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 38,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.border,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.done_all,
+                          size: 18, color: AppTheme.primary),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${read.length} of ${audience.length} have read this',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: AppTheme.border),
+                Expanded(
+                  child: ListView(
+                    controller: scrollController,
+                    children: [
+                      if (unread.isNotEmpty) ...[
+                        header('NOT READ (${unread.length})',
+                            const Color(0xFFDC2626)),
+                        ...unread.map((m) => person(m, false)),
+                      ],
+                      if (read.isNotEmpty) ...[
+                        header('READ (${read.length})', AppTheme.primary),
+                        ...read.map((m) => person(m, true)),
+                      ],
+                      if (audience.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Text(
+                            'Member list not loaded yet.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppTheme.textTertiary),
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -1444,7 +1586,13 @@ class _GroupChatPageState extends State<GroupChatPage> {
       String messageId, Map<String, dynamic> data, bool isMe) {
     final timeStr = _formatTime(data['sentAt'] as Timestamp?);
     final readBy = (data['readBy'] as List<dynamic>?) ?? [];
-    final readStatus = isMe ? _formatReadStatus(readBy) : '';
+    final senderId = (data['senderId'] ?? '').toString();
+    // Senders see their own receipts; admins see them on every message.
+    final showReadStatus = isMe || _isAdmin;
+    final readStatus =
+        showReadStatus ? _formatReadStatus(readBy, senderId) : '';
+    final allRead = _members.isNotEmpty &&
+        _readerCount(readBy, senderId) >= _audienceCount(senderId);
     final text = (data['text'] ?? '').toString();
     final imageUrl = data['imageUrl'] as String?;
     final fileUrl = data['fileUrl'] as String?;
@@ -1663,18 +1811,28 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             ),
                           ),
                         ],
-                        if (isMe && readStatus.isNotEmpty) ...[
+                        if (showReadStatus && readStatus.isNotEmpty) ...[
                           const SizedBox(width: 6),
-                          Text(
-                            '• $readStatus',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: readStatus == 'All read'
-                                  ? AppTheme.primary
-                                  : AppTheme.textTertiary,
-                              fontWeight: readStatus == 'All read'
-                                  ? FontWeight.w700
-                                  : FontWeight.normal,
+                          GestureDetector(
+                            onTap: _isAdmin
+                                ? () => _showReadReceipts(readBy, senderId)
+                                : null,
+                            child: Text(
+                              _isAdmin ? '• $readStatus ›' : '• $readStatus',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: allRead
+                                    ? AppTheme.primary
+                                    : (_isAdmin
+                                        ? AppTheme.primary
+                                        : AppTheme.textTertiary),
+                                fontWeight: allRead || _isAdmin
+                                    ? FontWeight.w700
+                                    : FontWeight.normal,
+                                decoration: _isAdmin
+                                    ? TextDecoration.underline
+                                    : null,
+                              ),
                             ),
                           ),
                         ],

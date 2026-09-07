@@ -29,6 +29,14 @@
   .hero p{color:var(--muted);font-size:16px;margin:16px auto 30px;max-width:520px}
   .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding-bottom:76px}
+  .install{padding-bottom:44px}
+  .install h2{font-size:20px;margin-bottom:6px}
+  .install .lead{color:var(--muted);font-size:14px;margin-bottom:18px}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .step{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+  .step h3{font-size:14px;margin-bottom:10px}
+  .step ol{margin:0;padding-left:18px}
+  .step li{font-size:13.5px;color:var(--muted);margin:6px 0}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px}
   .card h3{font-size:15px;margin-bottom:6px}
   .card p{color:var(--muted);font-size:13.5px}
@@ -49,10 +57,32 @@
     <p>Payslips, announcements, documents and team chat &mdash; for every member of staff, on any device.</p>
     <div class="cta">
       <a class="btn" href="/app/">Open web app</a>
-      <a class="btn ghost" href="/downloads/StaffConnect.apk" download>Download Android app (APK)</a>
     </div>
   </section>
 
+  <section class="install">
+    <h2>Put it on your phone</h2>
+    <p class="lead">Installing it to the home screen is what turns on notifications for new announcements, messages and payslips.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>Android</h3>
+        <ol>
+          <li>Open <a href="/app/">the web app</a> in Chrome.</li>
+          <li>Tap <strong>Install</strong> on the banner at the bottom &mdash; or the &#8942; menu, then <strong>Add to Home screen</strong>.</li>
+          <li>Open it from the home screen and allow notifications.</li>
+        </ol>
+      </div>
+      <div class="step">
+        <h3>iPhone / iPad</h3>
+        <ol>
+          <li>Open <a href="/app/">the web app</a> in <strong>Safari</strong> (not Chrome).</li>
+          <li>Tap the <strong>Share</strong> button, then <strong>Add to Home Screen</strong>.</li>
+          <li>Open it from the home screen and allow notifications.</li>
+        </ol>
+        <p style="font-size:12.5px;color:var(--muted);margin-top:10px">Notifications need iOS 16.4 or newer, and only work once it is on the home screen.</p>
+      </div>
+    </div>
+  </section>
   <section class="grid">
     <div class="card"><h3>Payslips</h3><p>Monthly OT and salary slips, delivered privately to each employee.</p></div>
     <div class="card"><h3>Announcements</h3><p>Company notices with read tracking, so nothing gets missed.</p></div>

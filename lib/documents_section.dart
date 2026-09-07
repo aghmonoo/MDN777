@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';
 import 'cloudinary_config.dart';
+import 'document_types.dart';
 
 class DocumentsSection extends StatefulWidget {
   final String userId;
@@ -21,16 +22,7 @@ class DocumentsSection extends StatefulWidget {
 class _DocumentsSectionState extends State<DocumentsSection> {
   late final CloudinaryPublic _cloudinary;
 
-  // Document definitions: key -> (label, pages)
-  static const List<Map<String, dynamic>> _docTypes = [
-    {'key': 'passportCi', 'label': 'Passport / CI Photo', 'pages': 1},
-    {'key': 'visa', 'label': 'Visa Photo', 'pages': 1},
-    {'key': 'workPermitPaper', 'label': 'Work Permit Paper', 'pages': 1},
-    {'key': 'workPermitCard', 'label': 'Work Permit Card', 'pages': 2},
-    {'key': 'days90Paper', 'label': '90 Days Paper', 'pages': 1},
-    {'key': 'tm30', 'label': 'TM30', 'pages': 1},
-    {'key': 'pinkCard', 'label': 'Pink Card', 'pages': 2},
-  ];
+  static const List<Map<String, dynamic>> _docTypes = DocumentTypes.types;
 
   String? _uploadingKey;
 

@@ -243,6 +243,14 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
                 data['department'] ?? 'Admin'),
             const Divider(height: 1, color: AppTheme.border, indent: 56),
             _infoRow(Icons.work_outline, 'Role', 'Administrator'),
+            const Divider(height: 1, color: AppTheme.border, indent: 56),
+            _infoRow(
+              Icons.phone_outlined,
+              'Phone',
+              (data['phone']?.toString().isEmpty ?? true)
+                  ? 'Not set'
+                  : data['phone'].toString(),
+            ),
           ],
         ),
       ),
@@ -431,6 +439,8 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
         TextEditingController(text: currentData['displayName'] ?? '');
     final employeeIdController =
         TextEditingController(text: currentData['employeeId'] ?? '');
+    final phoneController =
+        TextEditingController(text: (currentData['phone'] ?? '').toString());
 
     showDialog(
       context: context,
@@ -456,6 +466,15 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
                   border: OutlineInputBorder(),
                 ),
               ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Phone Number',
+                  border: OutlineInputBorder(),
+                ),
+              ),
             ],
           ),
         ),
@@ -477,6 +496,7 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
                     .update({
                   'displayName': displayNameController.text.trim(),
                   'employeeId': employeeIdController.text.trim(),
+                  'phone': phoneController.text.trim(),
                 });
 
                 if (context.mounted) {

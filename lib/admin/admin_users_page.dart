@@ -8,8 +8,10 @@ import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import '../file_download_helper.dart';
+import '../xlsx_reader.dart';
 import '../theme.dart';
 import 'admin_user_edit_page.dart';
+import 'admin_document_export_page.dart';
 import 'recycle_bin.dart';
 
 class AdminUsersPage extends StatefulWidget {
@@ -374,8 +376,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     FirebaseApp? secondaryApp;
 
     try {
-      final excel = Excel.decodeBytes(fileBytes);
-      final sheet = excel.tables[excel.tables.keys.first]!;
+      final sheet = XlsxReader.parse(fileBytes);
 
       try {
         secondaryApp = await Firebase.initializeApp(
@@ -392,8 +393,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
         final row = sheet.rows[i];
         if (row.isEmpty) continue;
 
-        String cellAt(int i) =>
-            (i < row.length ? row[i]?.value?.toString() ?? '' : '').trim();
+        String cellAt(int i) => (i < row.length ? row[i] : '').trim();
 
         final email = cellAt(0);
         final usernameCell = cellAt(1);
@@ -657,6 +657,18 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                   onPressed: _isImporting
                       ? null
                       : () => setState(() => _selectionMode = true),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.folder_zip_outlined),
+                  tooltip: 'Download staff documents',
+                  onPressed: _isImporting
+                      ? null
+                      : () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminDocumentExportPage(),
+                            ),
+                          ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.file_download_outlined),

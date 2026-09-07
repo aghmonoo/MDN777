@@ -103,10 +103,34 @@ class PaySlipPage extends StatelessWidget {
     final leaveDeduction = (data['leaveDeduction'] ?? 0).toDouble();
     final lateMinutes = (data['lateMinutes'] ?? 0).toDouble();
     final lateAmount = (data['lateAmount'] ?? 0).toDouble();
+    final publicHolidayDays = (data['publicHolidayDays'] ?? 0).toDouble();
+    final publicHolidayAmount = (data['publicHolidayAmount'] ?? 0).toDouble();
+    final trainingDays = (data['trainingDays'] ?? 0).toDouble();
+    final trainingAmount = (data['trainingAmount'] ?? 0).toDouble();
+    final customAmount = (data['customAmount'] ?? 0).toDouble();
+    final customReasonRaw = (data['customReason'] ?? '').toString().trim();
+    final customReason =
+        customReasonRaw.isEmpty ? 'Adjustment' : customReasonRaw;
     final netSalary = (data['netSalary'] ?? 0).toDouble();
 
-    final totalEarnings = basicSalary + allowance + kpiBonus + otAmount;
-    final totalDeductions = socialSecurity + leaveDeduction + lateAmount;
+    final bankName = (data['bankName'] ?? '').toString().trim();
+    final accountNumber = (data['accountNumber'] ?? '').toString().trim();
+    final accountHolder =
+        (data['accountHolderName'] ?? '').toString().trim();
+
+    // A positive adjustment is an earning, a negative one a deduction.
+    final customEarning = customAmount > 0 ? customAmount : 0.0;
+    final customDeduction = customAmount < 0 ? -customAmount : 0.0;
+
+    final totalEarnings = basicSalary +
+        allowance +
+        kpiBonus +
+        otAmount +
+        publicHolidayAmount +
+        trainingAmount +
+        customEarning;
+    final totalDeductions =
+        socialSecurity + leaveDeduction + lateAmount + customDeduction;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -247,32 +271,70 @@ class PaySlipPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Earnings
-                _miniLabel('EARNINGS', AppTheme.greenIcon),
-                const SizedBox(height: 10),
-                _row('Basic Salary', basicSalary, false),
-                _row('Allowance', allowance, false),
-                _row('KPI Bonus', kpiBonus, false),
-                _row(
-                  'Over Time${otHours > 0 ? " (${_formatHours(otHours)} hrs)" : ""}',
-                  otAmount,
-                  false,
-                ),
-                _subtotal('Total Earnings', totalEarnings,
-                    AppTheme.greenIcon),
-                const SizedBox(height: 20),
+                // Earnings - lines with nothing in them are left out.
+                if (totalEarnings != 0) ...[
+                  _miniLabel('EARNINGS', AppTheme.greenIcon),
+                  const SizedBox(height: 10),
+                  if (basicSalary != 0)
+                    _row('Basic Salary', basicSalary, false),
+                  if (allowance != 0) _row('Allowance', allowance, false),
+                  if (kpiBonus != 0) _row('KPI Bonus', kpiBonus, false),
+                  if (otAmount != 0 || otHours != 0)
+                    _row(
+                      'Over Time${otHours > 0 ? " (${_formatHours(otHours)} hrs)" : ""}',
+                      otAmount,
+                      false,
+                    ),
+                  if (publicHolidayAmount != 0 || publicHolidayDays != 0)
+                    _row(
+                      'Public Holiday${publicHolidayDays > 0 ? " (${_formatDays(publicHolidayDays)} ${publicHolidayDays == 1 ? "day" : "days"})" : ""}',
+                      publicHolidayAmount,
+                      false,
+                    ),
+                  if (trainingAmount != 0 || trainingDays != 0)
+                    _row(
+                      'Training${trainingDays > 0 ? " (${_formatDays(trainingDays)} ${trainingDays == 1 ? "day" : "days"})" : ""}',
+                      trainingAmount,
+                      false,
+                    ),
+                  if (customEarning != 0)
+                    _row(customReason, customEarning, false),
+                  _subtotal('Total Earnings', totalEarnings,
+                      AppTheme.greenIcon),
+                ],
                 // Deductions
-                _miniLabel('DEDUCTIONS', const Color(0xFFDC2626)),
-                const SizedBox(height: 10),
-                _row('Social Security', socialSecurity, true),
-                _row('Leave', leaveDeduction, true),
-                _row(
-                  'Late Minutes${lateMinutes > 0 ? " (${lateMinutes.toStringAsFixed(0)} min)" : ""}',
-                  lateAmount,
-                  true,
-                ),
-                _subtotal('Total Deductions', totalDeductions,
-                    const Color(0xFFDC2626)),
+                if (totalDeductions != 0) ...[
+                  const SizedBox(height: 20),
+                  _miniLabel('DEDUCTIONS', const Color(0xFFDC2626)),
+                  const SizedBox(height: 10),
+                  if (socialSecurity != 0)
+                    _row('Social Security', socialSecurity, true),
+                  if (leaveDeduction != 0)
+                    _row('Leave', leaveDeduction, true),
+                  if (lateAmount != 0 || lateMinutes != 0)
+                    _row(
+                      'Late Minutes${lateMinutes > 0 ? " (${lateMinutes.toStringAsFixed(0)} min)" : ""}',
+                      lateAmount,
+                      true,
+                    ),
+                  if (customDeduction != 0)
+                    _row(customReason, customDeduction, true),
+                  _subtotal('Total Deductions', totalDeductions,
+                      const Color(0xFFDC2626)),
+                ],
+                // Where the money was paid.
+                if (bankName.isNotEmpty ||
+                    accountNumber.isNotEmpty ||
+                    accountHolder.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  _miniLabel('PAID TO', AppTheme.primary),
+                  const SizedBox(height: 10),
+                  if (bankName.isNotEmpty) _textRow('Bank', bankName),
+                  if (accountNumber.isNotEmpty)
+                    _textRow('Account Number', accountNumber),
+                  if (accountHolder.isNotEmpty)
+                    _textRow('Account Holder', accountHolder),
+                ],
               ],
             ),
           ),
@@ -303,6 +365,38 @@ class PaySlipPage extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _textRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppTheme.textPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -366,6 +460,9 @@ class PaySlipPage extends StatelessWidget {
       ),
     );
   }
+
+  String _formatDays(double d) =>
+      d == d.roundToDouble() ? d.toStringAsFixed(0) : d.toStringAsFixed(1);
 
   String _formatHours(double h) =>
       h % 1 == 0 ? h.toStringAsFixed(0) : h.toStringAsFixed(1);

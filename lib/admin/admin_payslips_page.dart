@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../push_notifications.dart';
+import '../payslip_fields.dart';
+import '../xlsx_reader.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
@@ -73,26 +75,7 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
       final sheet = excel['Payslips'];
       excel.delete('Sheet1');
 
-      final headers = [
-        'employeeId',
-        'username',
-        'displayName',
-        'department',
-        'bankName',
-        'accountNumber',
-        'accountHolderName',
-        'month',
-        'basicSalary',
-        'allowance',
-        'kpiBonus',
-        'otHours',
-        'otAmount',
-        'socialSecurity',
-        'leaveDeduction',
-        'lateMinutes',
-        'lateAmount',
-        'netSalary',
-      ];
+      final headers = [...PayslipFields.headers, 'netSalary'];
 
       for (var i = 0; i < headers.length; i++) {
         final cell = sheet.cell(CellIndex.indexByColumnRow(
@@ -129,9 +112,15 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 7, rowIndex: rowIndex))
             .value = TextCellValue(currentMonth);
 
-        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 17, rowIndex: rowIndex))
+        // netSalary preview: earnings (incl. the prorated public holiday and
+        // the per-day training pay) minus deductions.
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 21, rowIndex: rowIndex))
             .value = FormulaCellValue(
-                'I$excelRowNum+J$excelRowNum+K$excelRowNum+M$excelRowNum-N$excelRowNum-O$excelRowNum-Q$excelRowNum');
+                'I$excelRowNum+J$excelRowNum+K$excelRowNum+M$excelRowNum'
+                '+(I$excelRowNum/${PayslipFields.monthDays.toStringAsFixed(0)}*N$excelRowNum)'
+                '+(O$excelRowNum*${PayslipFields.trainingDayRate.toStringAsFixed(0)})'
+                '+U$excelRowNum'
+                '-P$excelRowNum-Q$excelRowNum-S$excelRowNum');
       }
 
       final bytes = excel.save();
@@ -193,12 +182,20 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
 
       setState(() => _statusMessage = 'Reading Excel...');
 
-      final excel = Excel.decodeBytes(fileBytes);
-      final sheet = excel.tables[excel.tables.keys.first]!;
+      final sheet = XlsxReader.parse(fileBytes);
+
+      final headerRow = sheet.rows.isEmpty ? <String>[] : sheet.rows.first;
+      final columns = PayslipFields.resolve(headerRow);
+
+      String cellOf(List<String> row, String field) {
+        final index = columns[field];
+        if (index == null || index >= row.length) return '';
+        return row[index].trim();
+      }
 
       String batchMonth = '';
       if (sheet.rows.length > 1) {
-        batchMonth = sheet.rows[1][7]?.value?.toString() ?? '';
+        batchMonth = cellOf(sheet.rows[1], 'month');
       }
 
       if (batchMonth.isEmpty) {
@@ -252,34 +249,54 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
         if (row.isEmpty) continue;
 
         try {
-          Object? cellAt(int i) => i < row.length ? row[i]?.value : null;
-          final employeeId = cellAt(0)?.toString() ?? '';
-          final username = cellAt(1)?.toString() ?? '';
-          final displayName = cellAt(2)?.toString() ?? '';
-          final department = cellAt(3)?.toString() ?? '';
-          final bankName = cellAt(4)?.toString() ?? '';
-          final accountNumber = cellAt(5)?.toString() ?? '';
-          final accountHolderName = cellAt(6)?.toString() ?? '';
-          final month = cellAt(7)?.toString() ?? '';
-          final basicSalary = _parseNumber(cellAt(8));
-          final allowance = _parseNumber(cellAt(9));
-          final kpiBonus = _parseNumber(cellAt(10));
-          final otHours = _parseNumber(cellAt(11));
-          final otAmount = _parseNumber(cellAt(12));
-          final socialSecurity = _parseNumber(cellAt(13));
-          final leaveDeduction = _parseNumber(cellAt(14));
-          final lateMinutes = _parseNumber(cellAt(15));
-          final lateAmount = _parseNumber(cellAt(16));
+          String text(String field) => cellOf(row, field);
+          double number(String field) => _parseNumber(cellOf(row, field));
 
-          if (employeeId.isEmpty || username.isEmpty || month.isEmpty) continue;
+          final employeeId = text('employeeId');
+          final username = text('username');
+          final displayName = text('displayName');
+          final department = text('department');
+          final bankName = text('bankName');
+          final accountNumber = text('accountNumber');
+          final accountHolderName = text('accountHolderName');
+          final month = text('month');
+          final basicSalary = number('basicSalary');
+          final allowance = number('allowance');
+          final kpiBonus = number('kpiBonus');
+          final otHours = number('otHours');
+          final otAmount = number('otAmount');
+          final publicHolidayDays = number('publicHolidayDays');
+          final trainingDays = number('trainingDays');
+          final socialSecurity = number('socialSecurity');
+          final leaveDeduction = number('leaveDeduction');
+          final lateMinutes = number('lateMinutes');
+          final lateAmount = number('lateAmount');
+          final customReason = text('customReason').trim();
+          // Positive adds to earnings, negative is a deduction.
+          final customAmount = number('customAmount');
 
-          final netSalary = basicSalary +
+          // employeeId is optional - many profiles have none.
+          if (username.isEmpty || month.isEmpty) continue;
+
+          // A public holiday pays one extra day of the basic salary.
+          final publicHolidayAmount = _round(
+            basicSalary / PayslipFields.monthDays * publicHolidayDays,
+          );
+
+          // Trainees have no basic salary; they are paid per training day.
+          final trainingAmount =
+              _round(trainingDays * PayslipFields.trainingDayRate);
+
+          final netSalary = _round(basicSalary +
               allowance +
               kpiBonus +
-              otAmount -
+              otAmount +
+              publicHolidayAmount +
+              trainingAmount +
+              customAmount -
               socialSecurity -
               leaveDeduction -
-              lateAmount;
+              lateAmount);
 
           await FirebaseFirestore.instance.collection('payslips').add({
             'batchId': batchRef.id,
@@ -296,10 +313,17 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
             'kpiBonus': kpiBonus,
             'otHours': otHours,
             'otAmount': otAmount,
+            'publicHolidayDays': publicHolidayDays,
+            'publicHolidayAmount': publicHolidayAmount,
+            'trainingDays': trainingDays,
+            'trainingRate': PayslipFields.trainingDayRate,
+            'trainingAmount': trainingAmount,
             'socialSecurity': socialSecurity,
             'leaveDeduction': leaveDeduction,
             'lateMinutes': lateMinutes,
             'lateAmount': lateAmount,
+            'customReason': customReason,
+            'customAmount': customAmount,
             'netSalary': netSalary,
             'issuedDate': FieldValue.serverTimestamp(),
           });
@@ -343,6 +367,10 @@ class _AdminPayslipsPageState extends State<AdminPayslipsPage> {
       });
     }
   }
+
+  /// Keeps money to two decimals, so prorated amounts stay tidy.
+  double _round(double value) =>
+      double.parse(value.toStringAsFixed(2));
 
   double _parseNumber(dynamic value) {
     if (value == null) return 0;

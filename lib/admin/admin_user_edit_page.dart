@@ -20,6 +20,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
   final _displayNameController = TextEditingController();
   final _employeeIdController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _batchController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -56,6 +57,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         _usernameController.text = data['username'] ?? '';
         _displayNameController.text = data['displayName'] ?? '';
         _employeeIdController.text = data['employeeId'] ?? '';
+        _phoneController.text = (data['phone'] ?? '').toString();
         _emailController.text = data['email'] ?? '';
         _batchController.text = (data['batch'] ?? '').toString();
         _role = data['role'] ?? 'employee';
@@ -157,6 +159,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
         'email': _emailController.text.trim(),
         'displayName': displayName,
         'employeeId': employeeId,
+        'phone': _phoneController.text.trim(),
         'role': _role,
         'department': _role == 'admin' ? 'Admin' : _department,
       };
@@ -342,6 +345,7 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
     _usernameController.dispose();
     _displayNameController.dispose();
     _employeeIdController.dispose();
+    _phoneController.dispose();
     _emailController.dispose();
     _batchController.dispose();
     _passwordController.dispose();
@@ -439,6 +443,14 @@ class _AdminUserEditPageState extends State<AdminUserEditPage> {
                           label: 'Employee ID',
                           icon: Icons.badge_outlined,
                           helper: 'e.g. EMP-001 or ADMIN-001',
+                        ),
+                        const Divider(height: 1, color: AppTheme.border),
+                        _input(
+                          controller: _phoneController,
+                          label: 'Phone Number',
+                          icon: Icons.phone_outlined,
+                          keyboardType: TextInputType.phone,
+                          helper: 'Staff can update this themselves',
                         ),
                         const Divider(height: 1, color: AppTheme.border),
                         _input(

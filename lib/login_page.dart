@@ -139,7 +139,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 18),
                   const Text(
-                    'Staff Hub',
+                    'Staff Connect',
                     style: TextStyle(
                       fontSize: 30,
                       fontWeight: FontWeight.w700,
@@ -301,7 +301,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: 28),
                   Text(
-                    '© ${DateTime.now().year} Staff Hub',
+                    '© ${DateTime.now().year} Staff Connect',
                     style: const TextStyle(
                       fontSize: 11,
                       color: AppTheme.textTertiary,

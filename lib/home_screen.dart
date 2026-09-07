@@ -187,7 +187,7 @@ class HomeScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         const Text(
-                          'Staff Hub',
+                          'Staff Connect',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 13,

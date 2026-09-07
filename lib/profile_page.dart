@@ -61,7 +61,26 @@ class _ProfilePageState extends State<ProfilePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _sectionLabel('Personal Information'),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          _sectionLabel('Personal Information'),
+                          TextButton.icon(
+                            icon: const Icon(Icons.edit,
+                                size: 16, color: AppTheme.primary),
+                            label: const Text(
+                              'Edit',
+                              style: TextStyle(
+                                color: AppTheme.primary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            onPressed: () =>
+                                _showEditPhoneDialog(context, docId, data),
+                          ),
+                        ],
+                      ),
                       _infoCard([
                         _infoRow(Icons.badge_outlined, 'Employee ID',
                             data['employeeId'] ?? '-'),
@@ -73,6 +92,14 @@ class _ProfilePageState extends State<ProfilePage> {
                           Icons.work_outline,
                           'Role',
                           (data['role'] ?? '-').toString().toUpperCase(),
+                        ),
+                        _divider(),
+                        _infoRow(
+                          Icons.phone_outlined,
+                          'Phone',
+                          (data['phone']?.toString().isEmpty ?? true)
+                              ? 'Not set'
+                              : data['phone'],
                         ),
                       ]),
                       const SizedBox(height: 24),
@@ -456,6 +483,70 @@ class _ProfilePageState extends State<ProfilePage> {
           }
         },
       ),
+    );
+  }
+
+  void _showEditPhoneDialog(
+    BuildContext context,
+    String docId,
+    Map<String, dynamic> currentData,
+  ) {
+    final phoneController = TextEditingController(
+      text: (currentData['phone'] ?? '').toString(),
+    );
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text('Edit Phone Number'),
+          content: TextField(
+            controller: phoneController,
+            autofocus: true,
+            keyboardType: TextInputType.phone,
+            decoration: const InputDecoration(
+              labelText: 'Phone Number',
+              hintText: 'e.g. 08X XXX XXXX',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final phone = phoneController.text.trim();
+                Navigator.pop(dialogContext);
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(docId)
+                      .update({'phone': phone});
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Phone number updated'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error: $e')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
     );
   }
 

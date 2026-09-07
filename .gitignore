@@ -55,3 +55,7 @@ hosting/downloads/
 .firebase/
 firebase-debug.log
 *.firebase-debug.log
+
+# One-off admin scripts
+scripts/serviceAccount.json
+functions/serviceAccount.json

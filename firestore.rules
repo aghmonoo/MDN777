@@ -52,6 +52,7 @@ service cloud.firestore {
                  'bankName',
                  'accountNumber',
                  'accountHolderName',
+                 'phone',
                  'documents',
                  'uid',
                  'groupLastReadAt',
